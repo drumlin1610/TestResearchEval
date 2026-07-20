@@ -10,6 +10,8 @@ type SnapshotResponse = {
   year: number;
   fileName: string;
   databasePath: string;
+  rowCount?: number;
+  mode?: string;
 };
 
 type DimensionsRow = Record<string, string>;
@@ -74,38 +76,86 @@ export function DimensionsImportPanel() {
     }
   }
 
-  function previewCsvDirectly() {
-    if (!file) {
-      setState("error");
-      setMessage("Bitte zuerst eine CSV-Datei auswählen.");
-      return;
-    }
+  function parseSelectedCsv() {
+    return new Promise<DirectCsvPreview>((resolve, reject) => {
+      if (!file) {
+        reject(new Error("Bitte zuerst eine CSV-Datei auswählen."));
+        return;
+      }
 
+      Papa.parse<DimensionsRow>(file, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (header) => header.trim(),
+        complete: (result) => {
+          const rows = result.data.filter((row) => Object.values(row).some(Boolean));
+          const columns = result.meta.fields ?? Object.keys(rows[0] ?? {});
+          resolve({ columns, rows, rowCount: rows.length });
+        },
+        error: (error) => reject(error),
+      });
+    });
+  }
+
+  async function previewCsvDirectly() {
     setState("uploading");
     setResponse(null);
     setDirectPreview(null);
     setMessage("CSV wird direkt im Browser gelesen. Es wird kein DuckDB-Import gestartet.");
 
-    Papa.parse<DimensionsRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (header) => header.trim(),
-      complete: (result) => {
-        const rows = result.data.filter((row) => Object.values(row).some(Boolean));
-        const columns = result.meta.fields ?? Object.keys(rows[0] ?? {});
-        const missingColumns = requiredColumns.filter((column) => !columns.includes(column));
+    try {
+      const parsed = await parseSelectedCsv();
+      const missingColumns = requiredColumns.filter((column) => !parsed.columns.includes(column));
 
-        setDirectPreview({ columns, rows: rows.slice(0, 5), rowCount: rows.length });
-        setState(missingColumns.length ? "error" : "success");
-        setMessage(missingColumns.length
-          ? `CSV wurde gelesen, aber diese Pflichtspalten fehlen: ${missingColumns.join(", ")}.`
-          : `${rows.length} Dimensions-Zeilen direkt im Browser gelesen. Diese Variante braucht keinen DuckDB-Import.`);
-      },
-      error: (error) => {
-        setState("error");
-        setMessage(`CSV konnte nicht gelesen werden: ${error.message}`);
-      },
-    });
+      setDirectPreview({ ...parsed, rows: parsed.rows.slice(0, 5) });
+      setState(missingColumns.length ? "error" : "success");
+      setMessage(missingColumns.length
+        ? `CSV wurde gelesen, aber diese Pflichtspalten fehlen: ${missingColumns.join(", ")}.`
+        : `${parsed.rowCount} Dimensions-Zeilen direkt im Browser gelesen. Diese Variante braucht keinen DuckDB-Import.`);
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "CSV konnte nicht gelesen werden.");
+    }
+  }
+
+  async function saveWithInserts() {
+    const numericYear = Number(year);
+    if (!Number.isInteger(numericYear)) {
+      setState("error");
+      setMessage("Bitte ein numerisches Jahr erfassen, z. B. 2024.");
+      return;
+    }
+
+    setState("uploading");
+    setResponse(null);
+    setMessage("CSV wird im Browser gelesen und danach zeilenweise per Insert-API gespeichert. DuckDB read_csv_auto wird dabei nicht verwendet.");
+
+    try {
+      const parsed = await parseSelectedCsv();
+      const result = await fetch("/api/dimensions-snapshot/insert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: parsed.rows,
+          year: numericYear,
+          snapshotId: snapshotId.trim() || undefined,
+          fileName: file?.name,
+        }),
+      });
+      const payload = await result.json().catch(() => null);
+
+      if (!result.ok) {
+        throw new Error(payload?.error ?? `Insert-Import fehlgeschlagen (${result.status}).`);
+      }
+
+      setResponse(payload as SnapshotResponse);
+      setDirectPreview({ ...parsed, rows: parsed.rows.slice(0, 5) });
+      setState("success");
+      setMessage(`${payload.rowCount ?? parsed.rowCount} Dimensions-Zeilen wurden per Insert-API gespeichert.`);
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "Insert-Import fehlgeschlagen.");
+    }
   }
 
   const defaultSnapshotId = year && Number.isInteger(Number(year)) ? `dimensions-unibe-${year}` : "dimensions-unibe-YYYY";
@@ -116,8 +166,8 @@ export function DimensionsImportPanel() {
         <span className="icon-badge blue">GBQ</span>
         <div>
           <p className="eyebrow dark">Dimensions Import</p>
-          <h2 id="dimensions-import-title">GBQ CSV-Snapshot laden oder direkt prüfen</h2>
-          <p>Nutze wahlweise den DuckDB-Import für persistente Snapshots oder den Direktmodus, wenn du eine CSV ohne Serverimport prüfen möchtest.</p>
+          <h2 id="dimensions-import-title">GBQ-Daten per Import, Inserts oder Direktmodus laden</h2>
+          <p>Nutze wahlweise den DuckDB-CSV-Import, einen Insert-basierten Speicherweg ohne read_csv_auto oder den Direktmodus zur reinen Browserprüfung.</p>
         </div>
       </div>
 
@@ -139,8 +189,9 @@ export function DimensionsImportPanel() {
       </label>
 
       <div className="button-row">
-        <button type="button" onClick={importSnapshot} disabled={state === "uploading"}>{state === "uploading" ? "Verarbeitung läuft…" : "In DuckDB importieren"}</button>
-        <button type="button" className="secondary" onClick={previewCsvDirectly} disabled={state === "uploading"}>{state === "uploading" ? "Bitte warten…" : "Ohne Import prüfen"}</button>
+        <button type="button" onClick={importSnapshot} disabled={state === "uploading"}>{state === "uploading" ? "Verarbeitung läuft…" : "CSV-Import"}</button>
+        <button type="button" className="secondary" onClick={saveWithInserts} disabled={state === "uploading"}>{state === "uploading" ? "Bitte warten…" : "Per Inserts speichern"}</button>
+        <button type="button" className="ghost" onClick={previewCsvDirectly} disabled={state === "uploading"}>{state === "uploading" ? "Bitte warten…" : "Ohne Import prüfen"}</button>
       </div>
 
       <div className={`status-banner status-${state}`} aria-live="polite">
@@ -154,6 +205,8 @@ export function DimensionsImportPanel() {
           <div><dt>Jahr</dt><dd>{response.year}</dd></div>
           <div><dt>Datei</dt><dd>{response.fileName}</dd></div>
           <div><dt>DuckDB</dt><dd>{response.databasePath}</dd></div>
+          {response.rowCount !== undefined && <div><dt>Zeilen</dt><dd>{response.rowCount}</dd></div>}
+          {response.mode && <div><dt>Modus</dt><dd>{response.mode}</dd></div>}
         </dl>
       )}
 
@@ -185,6 +238,7 @@ export function DimensionsImportPanel() {
         <strong>Mögliche Wege</strong>
         <ul>
           <li><span>Persistenter Import</span><code>DuckDB-Tabelle</code></li>
+          <li><span>Insert-Import</span><code>JSON-Zeilen per API</code></li>
           <li><span>Direktmodus</span><code>Browser-CSV ohne Server</code></li>
           <li><span>Große Exporte</span><code>Parquet statt CSV empfohlen</code></li>
         </ul>
