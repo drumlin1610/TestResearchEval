@@ -155,10 +155,10 @@ export function ImportWorkbench() {
   }
 
   return (
-    <section className="panel import-workbench" aria-labelledby="import-title">
+    <section className="dashboard-card import-workbench" id="boris-import" aria-labelledby="import-title">
       <div className="section-heading">
-        <p className="eyebrow dark">BORIS-Import</p>
-        <h2 id="import-title">Export hochladen, sichten und als Auftrag starten</h2>
+        <p className="eyebrow dark">BORIS Import</p>
+        <h2 id="import-title">BORIS-Export hochladen, sichten und als Auftrag starten</h2>
         <p>CSV- und TSV-Exporte aus dem BORIS-Portal werden im Browser gelesen. Der Prototyp erkennt typische Spalten für BORIS-ID, DOI, PMID, Titel und Jahr.</p>
       </div>
 

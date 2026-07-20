@@ -1,3 +1,4 @@
+import { DimensionsImportPanel } from "./dimensions-import-panel";
 import { ImportWorkbench } from "./import-workbench";
 import { matchPublications } from "@/lib/dimensions-matching";
 
@@ -16,51 +17,73 @@ export default function Home() {
   const summary = matchPublications(demoSources, demoCandidates);
 
   return (
-    <main className="shell">
-      <section className="hero">
-        <p className="eyebrow">Forschungsevaluation</p>
-        <h1>BORIS-Portal-Exporte mit Dimensions auf Google BigQuery matchen</h1>
-        <p>
-          Ein Next.js-Prototyp für Import, Matching und Qualitätssicherung. Die Matching-Logik liegt bewusst in
-          <code> lib/dimensions-matching</code>, damit sie später als eigenständige Library wiederverwendet werden kann.
-        </p>
-      </section>
+    <main className="admin-shell">
+      <aside className="sidebar" aria-label="Dashboard Navigation">
+        <div className="brand-mark"><span>FE</span><strong>Research Eval</strong></div>
+        <nav>
+          <a href="#overview" className="active">Dashboard</a>
+          <a href="#boris-import">BORIS Import</a>
+          <a href="#dimensions-import">Dimensions Import</a>
+          <a href="#matching-demo">Matching Demo</a>
+        </nav>
+      </aside>
 
-      <section className="cards" aria-label="Kennzahlen">
-        <article><strong>{summary.total}</strong><span>Publikationen</span></article>
-        <article><strong>{summary.matched}</strong><span>Dimensions Matches</span></article>
-        <article><strong>{(summary.matchRate * 100).toFixed(1)}%</strong><span>Matchquote</span></article>
-        <article><strong>{(summary.averageConfidence * 100).toFixed(1)}%</strong><span>Ø Zuverlässigkeit</span></article>
-      </section>
+      <div className="dashboard-main">
+        <header className="topbar" id="overview">
+          <div>
+            <p className="eyebrow dark">Free Next.js Admin Dashboard</p>
+            <h1>Forschungsevaluation Dashboard</h1>
+            <p>BORIS-Portal-Exporte und Dimensions/GBQ-Snapshots zentral laden, sichten und für das lokale DuckDB-Matching vorbereiten.</p>
+          </div>
+          <div className="topbar-pill">DuckDB · GBQ · BORIS</div>
+        </header>
 
-      <section className="panel">
-        <h2>Vorgeschlagener Workflow</h2>
-        <ol>
-          <li>BORIS CSV/XLSX mit BorisID, DOI, PubMed-ID und Titel importieren.</li>
-          <li>Dimensions-Kandidaten via GBQ Publications-Tabelle nach DOI, PMID und Titel laden.</li>
-          <li>Deterministisches Matching nach DOI/PubMed-ID, danach Titel-Fallback mit Confidence Score.</li>
-          <li>Review-Ansicht für unsichere Treffer und Export der Matchquote für die Evaluation.</li>
-        </ol>
-      </section>
+        <section className="stats-grid" aria-label="Kennzahlen">
+          <article><span>Publikationen</span><strong>{summary.total}</strong><small>Demo-Datensatz</small></article>
+          <article><span>Dimensions Matches</span><strong>{summary.matched}</strong><small>DOI/PMID/Titel</small></article>
+          <article><span>Matchquote</span><strong>{(summary.matchRate * 100).toFixed(1)}%</strong><small>vorläufig</small></article>
+          <article><span>Ø Zuverlässigkeit</span><strong>{(summary.averageConfidence * 100).toFixed(1)}%</strong><small>Confidence Score</small></article>
+        </section>
 
-      <ImportWorkbench />
+        <section className="dashboard-grid">
+          <article className="dashboard-card workflow-card">
+            <p className="eyebrow dark">Workflow</p>
+            <h2>Vorgeschlagener Ablauf</h2>
+            <ol>
+              <li>BORIS CSV/TSV mit BorisID, DOI, PubMed-ID und Titel importieren.</li>
+              <li>Dimensions-Jahresdaten aus BigQuery als CSV exportieren.</li>
+              <li>GBQ-Snapshot über die Dimensions-Fläche in DuckDB laden.</li>
+              <li>Deterministisches Matching mit Review für unsichere Treffer starten.</li>
+            </ol>
+          </article>
+          <DimensionsImportPanel />
+        </section>
 
-      <section className="panel">
-        <h2>Demo-Ergebnis</h2>
-        <table>
-          <thead><tr><th>BorisID</th><th>Methode</th><th>Confidence</th><th>Dimensions ID</th></tr></thead>
-          <tbody>
-            {summary.results.map((result) => (
-              <tr key={result.source.borisId}>
-                <td>{result.source.borisId}</td>
-                <td>{result.method}</td>
-                <td>{(result.confidence * 100).toFixed(1)}%</td>
-                <td>{result.candidate?.id ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+        <ImportWorkbench />
+
+        <section className="dashboard-card" id="matching-demo">
+          <div className="card-heading">
+            <span className="icon-badge green">QA</span>
+            <div>
+              <p className="eyebrow dark">Matching Demo</p>
+              <h2>Demo-Ergebnis</h2>
+            </div>
+          </div>
+          <table>
+            <thead><tr><th>BorisID</th><th>Methode</th><th>Confidence</th><th>Dimensions ID</th></tr></thead>
+            <tbody>
+              {summary.results.map((result) => (
+                <tr key={result.source.borisId}>
+                  <td>{result.source.borisId}</td>
+                  <td>{result.method}</td>
+                  <td>{(result.confidence * 100).toFixed(1)}%</td>
+                  <td>{result.candidate?.id ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      </div>
     </main>
   );
 }

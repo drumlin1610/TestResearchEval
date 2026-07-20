@@ -12,6 +12,8 @@ type DuckDBInstance = {
   connect(): Promise<DuckDBConnection>;
 };
 
+export type DimensionsSnapshotRow = Record<string, unknown>;
+
 type DuckDBNodeApi = {
   DuckDBInstance: {
     fromCache(databasePath: string): Promise<DuckDBInstance>;
@@ -30,7 +32,7 @@ async function loadDuckDbApi() {
   return await import(/* webpackIgnore: true */ duckDbPackageName) as DuckDBNodeApi;
 }
 
-async function getConnection() {
+async function getConnection(): Promise<DuckDBConnection> {
   if (connectionPromise) return connectionPromise;
 
   connectionPromise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
@@ -138,6 +140,89 @@ export function buildDimensionsSnapshotImportSql() {
 export async function importDimensionsSnapshotFromCsv(options: { csvPath: string; snapshotId: string; year: number; fileName: string }) {
   await ensureDatabase();
   await runDuckDbSql(buildDimensionsSnapshotImportSql(), options);
+}
+
+function getTextValue(row: DimensionsSnapshotRow, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function getIntegerValue(row: DimensionsSnapshotRow, keys: string[], fallback: number) {
+  const value = getTextValue(row, keys);
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+export function buildDimensionsSnapshotInsertSql() {
+  return `
+    INSERT INTO dimensions_publications (
+      id,
+      snapshot_id,
+      doi,
+      pubmed_id,
+      title,
+      normalized_doi,
+      normalized_pubmed_id,
+      normalized_title,
+      year,
+      raw_payload
+    ) VALUES (
+      $id,
+      $snapshotId,
+      $doi,
+      $pubmedId,
+      $title,
+      lower(regexp_replace(regexp_replace(coalesce($doi, ''), '^https?://(dx\\.)?doi\\.org/', ''), '^doi:', '')),
+      regexp_replace(coalesce($pubmedId, ''), '[^0-9]', '', 'g'),
+      lower(regexp_replace(coalesce($title, ''), '[^[:alnum:] ]', ' ', 'g')),
+      $publicationYear,
+      $rawPayload::JSON
+    );
+  `;
+}
+
+export async function importDimensionsSnapshotFromRows(options: { snapshotId: string; year: number; fileName: string; rows: DimensionsSnapshotRow[] }) {
+  await ensureDatabase();
+  await runDuckDbSql("BEGIN TRANSACTION;");
+
+  try {
+    await runDuckDbSql("DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;", { snapshotId: options.snapshotId });
+    await runDuckDbSql("DELETE FROM dimensions_snapshots WHERE id = $snapshotId;", { snapshotId: options.snapshotId });
+
+    const insertPublicationSql = buildDimensionsSnapshotInsertSql();
+    let insertedRows = 0;
+
+    for (const row of options.rows) {
+      const id = getTextValue(row, ["id", "publication_id", "dimensions_id"]);
+      if (!id) continue;
+
+      await runDuckDbSql(insertPublicationSql, {
+        id,
+        snapshotId: options.snapshotId,
+        doi: getTextValue(row, ["doi", "DOI"]),
+        pubmedId: getTextValue(row, ["pubmed_id", "pubmedId", "pmid", "PMID"]),
+        title: getTextValue(row, ["title", "Title"]),
+        publicationYear: getIntegerValue(row, ["year", "publication_year", "publicationYear"], options.year),
+        rawPayload: JSON.stringify(row),
+      });
+      insertedRows += 1;
+    }
+
+    await runDuckDbSql(`
+      INSERT INTO dimensions_snapshots (id, year, file_name, row_count, status)
+      VALUES ($snapshotId, $year, $fileName, $rowCount, 'active');
+    `, { snapshotId: options.snapshotId, year: options.year, fileName: options.fileName, rowCount: insertedRows });
+    await runDuckDbSql("COMMIT;");
+    return insertedRows;
+  } catch (error) {
+    await runDuckDbSql("ROLLBACK;").catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function createDuckDbImportSessionRepository(): Promise<AsyncImportSessionRepository> {
