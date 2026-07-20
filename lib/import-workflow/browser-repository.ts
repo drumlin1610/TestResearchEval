@@ -1,19 +1,15 @@
-import type { ImportSessionRepository, PersistedImportSession } from "./types";
-
-const importSessionStorageKey = "boris-import-workbench-session";
+import type { ImportSessionRepository } from "./types";
+import { createPersistedImportSession, importSessionStorageKey, parsePersistedImportSession } from "./persistence";
 
 export function createBrowserImportSessionRepository(storage: Storage): ImportSessionRepository {
   return {
     load() {
       const rawSession = storage.getItem(importSessionStorageKey);
       if (!rawSession) return null;
-      return JSON.parse(rawSession) as PersistedImportSession;
+      return parsePersistedImportSession(rawSession);
     },
     save(session) {
-      const persistedSession: PersistedImportSession = {
-        ...session,
-        savedAt: new Date().toLocaleString("de-CH"),
-      };
+      const persistedSession = createPersistedImportSession(session);
       storage.setItem(importSessionStorageKey, JSON.stringify(persistedSession));
       return persistedSession;
     },

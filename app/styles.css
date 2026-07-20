@@ -49,3 +49,17 @@ button.ghost { background: transparent; color: #0b5cad; box-shadow: inset 0 0 0 
 .schema-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: #52677a; }
 .schema-list code { background: #eaf4ff; color: #132238; }
 .warning { color: #9a3412; font-weight: 700; }
+.workflow-log { margin-top: 26px; padding: 18px; border: 1px solid #d8e2ef; border-radius: 18px; background: #fbfdff; }
+.workflow-log ol { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0; }
+.workflow-log li { display: grid; gap: 3px; padding: 12px 14px; border-left: 4px solid #8bb8e8; background: white; border-radius: 12px; }
+.workflow-log time { color: #52677a; font-size: .82rem; }
+.workflow-log strong { color: #132238; }
+.workflow-log span { color: #52677a; }
+.workflow-log .log-success { border-left-color: #15803d; }
+.workflow-log .log-warning { border-left-color: #d97706; }
+.workflow-log .log-error { border-left-color: #b91c1c; }
+.workflow-log .log-empty { color: #52677a; }
+.data-grid { overflow: auto; border: 1px solid #d8e2ef; border-radius: 16px; max-height: 420px; }
+.data-grid table { min-width: 760px; border-radius: 0; }
+.data-grid th { position: sticky; top: 0; background: #f7fbff; z-index: 1; }
+.data-grid td { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
