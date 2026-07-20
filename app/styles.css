@@ -18,3 +18,34 @@ th, td { padding: 14px 12px; border-bottom: 1px solid #e6edf5; text-align: left;
 th { color: #52677a; font-size: .9rem; }
 @media (max-width: 760px) { .cards { grid-template-columns: 1fr 1fr; } .hero { padding: 32px 24px; } }
 @media (max-width: 520px) { .cards { grid-template-columns: 1fr; } }
+.section-heading { max-width: 820px; }
+.eyebrow.dark { color: #0b5cad; margin: 0 0 8px; }
+.import-workbench h2 { margin: 0 0 12px; font-size: clamp(1.8rem, 3vw, 2.7rem); }
+.import-workbench h3 { margin-top: 28px; color: #132238; }
+.muted { color: #52677a; line-height: 1.6; }
+.dropzone { display: grid; gap: 8px; margin: 22px 0 12px; padding: 28px; border: 2px dashed #8bb8e8; border-radius: 20px; background: #f7fbff; cursor: pointer; }
+.dropzone span { color: #52677a; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: .8rem; }
+.dropzone strong { color: #0b5cad; font-size: 1.25rem; }
+.dropzone input { margin-top: 8px; }
+.cards.compact { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 18px 0; }
+.cards.compact article { box-shadow: none; padding: 18px; }
+.cards.compact strong { font-size: 1.9rem; }
+.workflow-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); gap: 22px; align-items: start; }
+.job-card { border: 1px solid #d8e2ef; border-radius: 18px; padding: 20px; background: #fbfdff; }
+.button-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+button { border: 0; border-radius: 999px; background: #0b5cad; color: white; cursor: pointer; font-weight: 800; padding: 12px 18px; }
+button.secondary { background: #132238; }
+button:disabled { background: #b8c5d4; cursor: not-allowed; }
+.job-status { display: grid; gap: 8px; border-top: 1px solid #d8e2ef; padding-top: 16px; }
+.job-status span { color: #0b5cad; font-weight: 800; }
+.job-status strong { font-size: 1.8rem; }
+progress { width: 100%; height: 12px; accent-color: #0b5cad; }
+.job-status p { margin: 0; color: #132238; }
+.job-status small { color: #52677a; }
+@media (max-width: 900px) { .workflow-grid { grid-template-columns: 1fr; } .cards.compact { grid-template-columns: 1fr 1fr; } }
+button.ghost { background: transparent; color: #0b5cad; box-shadow: inset 0 0 0 2px #8bb8e8; }
+.schema-list { margin: 18px 0; padding: 18px; border: 1px solid #d8e2ef; border-radius: 18px; background: #fbfdff; }
+.schema-list ul { display: grid; gap: 8px; list-style: none; padding: 0; margin: 12px 0 0; }
+.schema-list li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; color: #52677a; }
+.schema-list code { background: #eaf4ff; color: #132238; }
+.warning { color: #9a3412; font-weight: 700; }
