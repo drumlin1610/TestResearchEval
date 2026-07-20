@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Papa from "papaparse";
 
 type ImportState = "idle" | "uploading" | "success" | "error";
 
@@ -11,6 +12,16 @@ type SnapshotResponse = {
   databasePath: string;
 };
 
+type DimensionsRow = Record<string, string>;
+
+type DirectCsvPreview = {
+  columns: string[];
+  rows: DimensionsRow[];
+  rowCount: number;
+};
+
+const requiredColumns = ["id", "doi", "pubmed_id", "title", "year"];
+
 export function DimensionsImportPanel() {
   const [file, setFile] = useState<File | null>(null);
   const [year, setYear] = useState(String(new Date().getFullYear()));
@@ -18,6 +29,7 @@ export function DimensionsImportPanel() {
   const [state, setState] = useState<ImportState>("idle");
   const [message, setMessage] = useState("Noch kein Dimensions/GBQ CSV-Snapshot geladen.");
   const [response, setResponse] = useState<SnapshotResponse | null>(null);
+  const [directPreview, setDirectPreview] = useState<DirectCsvPreview | null>(null);
 
   async function importSnapshot() {
     if (!file) {
@@ -50,7 +62,7 @@ export function DimensionsImportPanel() {
       const payload = await result.json().catch(() => null);
 
       if (!result.ok) {
-        throw new Error(payload?.error ?? `Import fehlgeschlagen (${result.status}).`);
+        throw new Error(payload?.error ?? `Import fehlgeschlagen (${result.status}). Nutze alternativ den Direktmodus ohne DuckDB.`);
       }
 
       setResponse(payload as SnapshotResponse);
@@ -58,8 +70,42 @@ export function DimensionsImportPanel() {
       setMessage(`Snapshot ${payload.snapshotId} wurde erfolgreich importiert.`);
     } catch (error) {
       setState("error");
-      setMessage(error instanceof Error ? error.message : "Dimensions-Import fehlgeschlagen.");
+      setMessage(error instanceof Error ? error.message : "Dimensions-Import fehlgeschlagen. Nutze alternativ den Direktmodus ohne DuckDB.");
     }
+  }
+
+  function previewCsvDirectly() {
+    if (!file) {
+      setState("error");
+      setMessage("Bitte zuerst eine CSV-Datei auswählen.");
+      return;
+    }
+
+    setState("uploading");
+    setResponse(null);
+    setDirectPreview(null);
+    setMessage("CSV wird direkt im Browser gelesen. Es wird kein DuckDB-Import gestartet.");
+
+    Papa.parse<DimensionsRow>(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim(),
+      complete: (result) => {
+        const rows = result.data.filter((row) => Object.values(row).some(Boolean));
+        const columns = result.meta.fields ?? Object.keys(rows[0] ?? {});
+        const missingColumns = requiredColumns.filter((column) => !columns.includes(column));
+
+        setDirectPreview({ columns, rows: rows.slice(0, 5), rowCount: rows.length });
+        setState(missingColumns.length ? "error" : "success");
+        setMessage(missingColumns.length
+          ? `CSV wurde gelesen, aber diese Pflichtspalten fehlen: ${missingColumns.join(", ")}.`
+          : `${rows.length} Dimensions-Zeilen direkt im Browser gelesen. Diese Variante braucht keinen DuckDB-Import.`);
+      },
+      error: (error) => {
+        setState("error");
+        setMessage(`CSV konnte nicht gelesen werden: ${error.message}`);
+      },
+    });
   }
 
   const defaultSnapshotId = year && Number.isInteger(Number(year)) ? `dimensions-unibe-${year}` : "dimensions-unibe-YYYY";
@@ -70,8 +116,8 @@ export function DimensionsImportPanel() {
         <span className="icon-badge blue">GBQ</span>
         <div>
           <p className="eyebrow dark">Dimensions Import</p>
-          <h2 id="dimensions-import-title">GBQ CSV-Snapshot in DuckDB laden</h2>
-          <p>Exportiere Dimensions-Daten aus Google BigQuery als CSV und lade den Jahres-Snapshot direkt in die lokale DuckDB-Schicht.</p>
+          <h2 id="dimensions-import-title">GBQ CSV-Snapshot laden oder direkt prüfen</h2>
+          <p>Nutze wahlweise den DuckDB-Import für persistente Snapshots oder den Direktmodus, wenn du eine CSV ohne Serverimport prüfen möchtest.</p>
         </div>
       </div>
 
@@ -93,11 +139,12 @@ export function DimensionsImportPanel() {
       </label>
 
       <div className="button-row">
-        <button type="button" onClick={importSnapshot} disabled={state === "uploading"}>{state === "uploading" ? "Import läuft…" : "Dimensions Snapshot importieren"}</button>
+        <button type="button" onClick={importSnapshot} disabled={state === "uploading"}>{state === "uploading" ? "Verarbeitung läuft…" : "In DuckDB importieren"}</button>
+        <button type="button" className="secondary" onClick={previewCsvDirectly} disabled={state === "uploading"}>{state === "uploading" ? "Bitte warten…" : "Ohne Import prüfen"}</button>
       </div>
 
       <div className={`status-banner status-${state}`} aria-live="polite">
-        <strong>{state === "success" ? "Erfolg" : state === "error" ? "Fehler" : state === "uploading" ? "Verarbeitung" : "Bereit"}</strong>
+        <strong>{state === "success" ? "Erfolg" : state === "error" ? "Hinweis" : state === "uploading" ? "Verarbeitung" : "Bereit"}</strong>
         <span>{message}</span>
       </div>
 
@@ -110,9 +157,38 @@ export function DimensionsImportPanel() {
         </dl>
       )}
 
+      {directPreview && (
+        <div className="direct-preview">
+          <div className="direct-preview-header">
+            <strong>Direktmodus-Vorschau</strong>
+            <span>{directPreview.rowCount} Zeilen · {directPreview.columns.length} Spalten</span>
+          </div>
+          <p className="muted"><strong>Erkannte Spalten:</strong> {directPreview.columns.join(", ")}</p>
+          <div className="data-grid direct-preview-grid" role="region" aria-label="Dimensions CSV Direktvorschau" tabIndex={0}>
+            <table>
+              <thead>
+                <tr>{directPreview.columns.slice(0, 6).map((column) => <th key={column}>{column}</th>)}</tr>
+              </thead>
+              <tbody>
+                {directPreview.rows.map((row, rowIndex) => (
+                  <tr key={`dimensions-${rowIndex}`}>
+                    {directPreview.columns.slice(0, 6).map((column) => <td key={`${rowIndex}-${column}`}>{row[column] || "—"}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="schema-list compact-schema">
-        <strong>Erwartete CSV-Spalten</strong>
-        <p className="muted">Der Import erwartet aktuell <code>id</code>, <code>doi</code>, <code>pubmed_id</code>, <code>title</code> und <code>year</code>. Weitere Spalten werden im Roh-Payload gespeichert.</p>
+        <strong>Mögliche Wege</strong>
+        <ul>
+          <li><span>Persistenter Import</span><code>DuckDB-Tabelle</code></li>
+          <li><span>Direktmodus</span><code>Browser-CSV ohne Server</code></li>
+          <li><span>Große Exporte</span><code>Parquet statt CSV empfohlen</code></li>
+        </ul>
+        <p className="muted">Für den DuckDB-Import werden aktuell <code>id</code>, <code>doi</code>, <code>pubmed_id</code>, <code>title</code> und <code>year</code> erwartet.</p>
       </div>
     </section>
   );
