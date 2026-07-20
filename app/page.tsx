@@ -1,3 +1,4 @@
+import { ImportWorkbench } from "./import-workbench";
 import { matchPublications } from "@/lib/dimensions-matching";
 
 const demoSources = [
@@ -41,6 +42,8 @@ export default function Home() {
           <li>Review-Ansicht für unsichere Treffer und Export der Matchquote für die Evaluation.</li>
         </ol>
       </section>
+
+      <ImportWorkbench />
 
       <section className="panel">
         <h2>Demo-Ergebnis</h2>
