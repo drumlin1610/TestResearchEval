@@ -196,13 +196,15 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
   });
   await ensureDatabase();
   console.info("[dimensions:insert] DuckDB schema is ready", { snapshotId: options.snapshotId });
-  await runDuckDbSql("BEGIN TRANSACTION;");
-  console.info("[dimensions:insert] Transaction started", { snapshotId: options.snapshotId });
 
   try {
+    console.info("[dimensions:insert] Clearing existing publication rows", { snapshotId: options.snapshotId });
     await runDuckDbSql("DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;", { snapshotId: options.snapshotId });
+    console.info("[dimensions:insert] Existing publication rows cleared", { snapshotId: options.snapshotId });
+
+    console.info("[dimensions:insert] Clearing existing snapshot metadata", { snapshotId: options.snapshotId });
     await runDuckDbSql("DELETE FROM dimensions_snapshots WHERE id = $snapshotId;", { snapshotId: options.snapshotId });
-    console.info("[dimensions:insert] Existing snapshot rows cleared", { snapshotId: options.snapshotId });
+    console.info("[dimensions:insert] Existing snapshot metadata cleared", { snapshotId: options.snapshotId });
 
     const insertPublicationSql = buildDimensionsSnapshotInsertSql();
     let insertedRows = 0;
@@ -216,6 +218,10 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
           rowNumber: processedRows,
         });
         continue;
+      }
+
+      if (insertedRows === 0) {
+        console.info("[dimensions:insert] Starting row inserts", { snapshotId: options.snapshotId });
       }
 
       await runDuckDbSql(insertPublicationSql, {
@@ -238,23 +244,25 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
       }
     }
 
+    console.info("[dimensions:insert] Writing snapshot metadata", {
+      snapshotId: options.snapshotId,
+      insertedRows,
+    });
     await runDuckDbSql(`
       INSERT INTO dimensions_snapshots (id, year, file_name, row_count, status)
       VALUES ($snapshotId, $year, $fileName, $rowCount, 'active');
     `, { snapshotId: options.snapshotId, year: options.year, fileName: options.fileName, rowCount: insertedRows });
-    await runDuckDbSql("COMMIT;");
-    console.info("[dimensions:insert] Import committed", {
+    console.info("[dimensions:insert] Import completed", {
       snapshotId: options.snapshotId,
       insertedRows,
       skippedRows: options.rows.length - insertedRows,
     });
     return insertedRows;
   } catch (error) {
-    console.error("[dimensions:insert] Import failed; rolling back", {
+    console.error("[dimensions:insert] Import failed", {
       snapshotId: options.snapshotId,
       error,
     });
-    await runDuckDbSql("ROLLBACK;").catch(() => undefined);
     throw error;
   }
 }
