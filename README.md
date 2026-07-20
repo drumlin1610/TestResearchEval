@@ -27,6 +27,6 @@ Dimensions auf BigQuery ist ein subscription-only Dataset; die offizielle Dokume
 
 Der aktuelle Prototyp speichert hochgeladene BORIS-Imports und den angelegten Auftrag serverseitig in `data/research-eval.duckdb`. Die DuckDB-Schicht passt zum zweistufigen Workflow: Dimensions/GBQ-Jahresexporte der UniBE können als CSV-Snapshot geladen und danach lokal gegen BORIS-Exporte gematcht werden.
 
-Voraussetzung für die Laufzeit ist die installierte DuckDB-CLI (`duckdb`). Die Route `POST /api/dimensions-snapshot` erwartet ein Multipart-Formular mit `file`, `year` und optional `snapshotId`. Der CSV-Import nutzt `read_csv_auto` und legt normalisierte Lookup-Spalten für DOI, PubMed-ID und Titel in `dimensions_publications` an. Erwartete CSV-Spalten sind `id`, `doi`, `pubmed_id`, `title` und `year`.
+Die DuckDB-Anbindung nutzt den offiziellen Node.js Client `@duckdb/node-api`, sodass keine separate DuckDB-CLI im `PATH` benötigt wird. Die Route `POST /api/dimensions-snapshot` erwartet ein Multipart-Formular mit `file`, `year` und optional `snapshotId`. Der CSV-Import nutzt `read_csv_auto` und legt normalisierte Lookup-Spalten für DOI, PubMed-ID und Titel in `dimensions_publications` an. Erwartete CSV-Spalten sind `id`, `doi`, `pubmed_id`, `title` und `year`.
 
 Für produktive Imports bleibt Objekt-Storage plus Metadaten-Datenbank sinnvoll, wenn Originaldateien versioniert abgelegt werden sollen. DuckDB übernimmt dabei die analytische Schicht für CSV/Parquet-Verarbeitung, lokale Batch-Jobs und reproduzierbare Zwischenstände pro Auftrag.

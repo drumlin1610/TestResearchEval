@@ -3,18 +3,13 @@ import { buildDimensionsSnapshotImportSql } from "../lib/import-workflow/server-
 
 describe("DuckDB import workflow repository", () => {
   it("builds a Dimensions CSV snapshot import with normalized lookup columns", () => {
-    const sql = buildDimensionsSnapshotImportSql({
-      csvPath: "/tmp/dimensions.csv",
-      snapshotId: "dimensions-unibe-2025",
-      year: 2025,
-      fileName: "dimensions.csv",
-    });
+    const sql = buildDimensionsSnapshotImportSql();
 
-    expect(sql).toContain("read_csv_auto('/tmp/dimensions.csv'");
+    expect(sql).toContain("read_csv_auto($csvPath");
     expect(sql).toContain("INSERT INTO dimensions_snapshots");
     expect(sql).toContain("normalized_doi");
     expect(sql).toContain("normalized_pubmed_id");
     expect(sql).toContain("normalized_title");
-    expect(sql).toContain("'dimensions-unibe-2025'");
+    expect(sql).toContain("$snapshotId");
   });
 });

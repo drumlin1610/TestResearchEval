@@ -1,36 +1,56 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { AsyncImportSessionRepository } from "./types";
 import { createPersistedImportSession, importSessionStorageKey, parsePersistedImportSession } from "./persistence";
 
-const execFileAsync = promisify(execFile);
+type DuckDBConnection = {
+  run(sql: string, values?: Record<string, unknown>): Promise<unknown>;
+  runAndReadAll(sql: string, values?: Record<string, unknown>): Promise<{ getRowObjects(): unknown[] }>;
+};
+
+type DuckDBInstance = {
+  connect(): Promise<DuckDBConnection>;
+};
+
+type DuckDBNodeApi = {
+  DuckDBInstance: {
+    fromCache(databasePath: string): Promise<DuckDBInstance>;
+  };
+};
+
+const duckDbPackageName = "@duckdb/node-api";
 const databaseDirectory = path.join(process.cwd(), "data");
 const databasePath = path.join(databaseDirectory, "research-eval.duckdb");
 
+let connectionPromise: Promise<DuckDBConnection> | null = null;
 let repositoryPromise: Promise<AsyncImportSessionRepository> | null = null;
 let databaseReadyPromise: Promise<void> | null = null;
 
-function sqlString(value: string) {
-  return `'${value.replaceAll("'", "''")}'`;
+async function loadDuckDbApi() {
+  return await import(/* webpackIgnore: true */ duckDbPackageName) as DuckDBNodeApi;
 }
 
-async function runDuckDbSql(sql: string) {
-  await mkdir(databaseDirectory, { recursive: true });
-  const tempDirectory = await mkdtemp(path.join(tmpdir(), "research-eval-duckdb-"));
-  const sqlFile = path.join(tempDirectory, "statement.sql");
-  await writeFile(sqlFile, sql);
+async function getConnection() {
+  if (connectionPromise) return connectionPromise;
 
-  try {
-    const { stdout } = await execFileAsync("duckdb", [databasePath, "-json", "-c", `.read ${sqlFile}`], {
-      maxBuffer: 1024 * 1024 * 32,
-    });
-    return stdout;
-  } finally {
-    await rm(tempDirectory, { recursive: true, force: true });
-  }
+  connectionPromise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
+    const { DuckDBInstance } = await loadDuckDbApi();
+    const instance = await DuckDBInstance.fromCache(databasePath);
+    return await instance.connect();
+  });
+
+  return connectionPromise;
+}
+
+async function runDuckDbSql(sql: string, values?: Record<string, unknown>) {
+  const connection = await getConnection();
+  await connection.run(sql, values);
+}
+
+async function readDuckDbRows<Row>(sql: string, values?: Record<string, unknown>) {
+  const connection = await getConnection();
+  const reader = await connection.runAndReadAll(sql, values);
+  return reader.getRowObjects() as Row[];
 }
 
 async function ensureDatabase() {
@@ -70,25 +90,21 @@ async function ensureDatabase() {
     CREATE INDEX IF NOT EXISTS idx_dimensions_publications_pubmed ON dimensions_publications(normalized_pubmed_id);
     CREATE INDEX IF NOT EXISTS idx_dimensions_publications_title ON dimensions_publications(normalized_title);
     CREATE INDEX IF NOT EXISTS idx_dimensions_publications_snapshot ON dimensions_publications(snapshot_id);
-  `).then(() => undefined);
+  `);
 
   return databaseReadyPromise;
 }
 
-export function buildDimensionsSnapshotImportSql(options: { csvPath: string; snapshotId: string; year: number; fileName: string }) {
-  const csvPath = sqlString(options.csvPath);
-  const snapshotId = sqlString(options.snapshotId);
-  const fileName = sqlString(options.fileName);
-
+export function buildDimensionsSnapshotImportSql() {
   return `
     CREATE OR REPLACE TEMP TABLE imported_dimensions AS
-      SELECT * FROM read_csv_auto(${csvPath}, header = true, ignore_errors = true);
+      SELECT * FROM read_csv_auto($csvPath, header = true, ignore_errors = true);
 
-    DELETE FROM dimensions_publications WHERE snapshot_id = ${snapshotId};
-    DELETE FROM dimensions_snapshots WHERE id = ${snapshotId};
+    DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;
+    DELETE FROM dimensions_snapshots WHERE id = $snapshotId;
 
     INSERT INTO dimensions_snapshots (id, year, file_name, row_count, status)
-      SELECT ${snapshotId}, ${options.year}, ${fileName}, count(*), 'active'
+      SELECT $snapshotId, $year, $fileName, count(*), 'active'
       FROM imported_dimensions;
 
     INSERT INTO dimensions_publications (
@@ -105,7 +121,7 @@ export function buildDimensionsSnapshotImportSql(options: { csvPath: string; sna
     )
     SELECT
       id,
-      ${snapshotId} AS snapshot_id,
+      $snapshotId AS snapshot_id,
       doi,
       pubmed_id,
       title,
@@ -121,7 +137,7 @@ export function buildDimensionsSnapshotImportSql(options: { csvPath: string; sna
 
 export async function importDimensionsSnapshotFromCsv(options: { csvPath: string; snapshotId: string; year: number; fileName: string }) {
   await ensureDatabase();
-  await runDuckDbSql(buildDimensionsSnapshotImportSql(options));
+  await runDuckDbSql(buildDimensionsSnapshotImportSql(), options);
 }
 
 export async function createDuckDbImportSessionRepository(): Promise<AsyncImportSessionRepository> {
@@ -129,25 +145,24 @@ export async function createDuckDbImportSessionRepository(): Promise<AsyncImport
 
   repositoryPromise = ensureDatabase().then(() => ({
     async load() {
-      const stdout = await runDuckDbSql(`
+      const rows = await readDuckDbRows<{ payload: string }>(`
         SELECT payload::VARCHAR AS payload
         FROM import_sessions
-        WHERE session_key = ${sqlString(importSessionStorageKey)}
+        WHERE session_key = $sessionKey
         LIMIT 1;
-      `);
-      const rows = JSON.parse(stdout || "[]") as { payload: string }[];
+      `, { sessionKey: importSessionStorageKey });
       return rows[0]?.payload ? parsePersistedImportSession(rows[0].payload) : null;
     },
     async save(session) {
       const persistedSession = createPersistedImportSession(session);
       await runDuckDbSql(`
         INSERT OR REPLACE INTO import_sessions (session_key, payload, saved_at)
-        VALUES (${sqlString(importSessionStorageKey)}, ${sqlString(JSON.stringify(persistedSession))}::JSON, current_timestamp);
-      `);
+        VALUES ($sessionKey, $payload::JSON, current_timestamp);
+      `, { sessionKey: importSessionStorageKey, payload: JSON.stringify(persistedSession) });
       return persistedSession;
     },
     async clear() {
-      await runDuckDbSql(`DELETE FROM import_sessions WHERE session_key = ${sqlString(importSessionStorageKey)};`);
+      await runDuckDbSql("DELETE FROM import_sessions WHERE session_key = $sessionKey;", { sessionKey: importSessionStorageKey });
     },
   }));
 
