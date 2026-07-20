@@ -37,3 +37,10 @@ export type ImportSessionRepository = {
   save(session: ImportSessionDraft): PersistedImportSession;
   clear(): void;
 };
+
+
+export type AsyncImportSessionRepository = {
+  load(): Promise<PersistedImportSession | null>;
+  save(session: ImportSessionDraft): Promise<PersistedImportSession>;
+  clear(): Promise<void>;
+};

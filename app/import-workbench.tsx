@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { matchPublications, type SourcePublication } from "@/lib/dimensions-matching";
-import { createBrowserImportSessionRepository } from "@/lib/import-workflow/browser-repository";
+import { createHttpImportSessionRepository } from "@/lib/import-workflow/http-repository";
 import {
   borisFieldDefinitions,
   detectBorisColumns,
@@ -35,30 +35,31 @@ export function ImportWorkbench() {
   const [workflowLog, setWorkflowLog] = useState<WorkflowLogEntry[]>([]);
 
   useEffect(() => {
-    const repository = createBrowserImportSessionRepository(window.localStorage);
+    const repository = createHttpImportSessionRepository();
 
-    try {
-      const session = repository.load();
-      if (!session) return;
-      setFileName(session.fileName);
-      setRows(session.rows);
-      setSources(session.sources);
-      setJob(session.job);
-      setLastSavedAt(session.savedAt);
-      setWorkflowLog(session.workflowLog);
-      setParseMessage(`${session.rows.length} Zeilen aus dem lokalen Zwischenspeicher wiederhergestellt.`);
-    } catch {
-      createBrowserImportSessionRepository(window.localStorage).clear();
-      setParseMessage("Gespeicherte Importsitzung war ungültig und wurde verworfen.");
-    }
+    repository.load()
+      .then((session) => {
+        if (!session) return;
+        setFileName(session.fileName);
+        setRows(session.rows);
+        setSources(session.sources);
+        setJob(session.job);
+        setLastSavedAt(session.savedAt);
+        setWorkflowLog(session.workflowLog);
+        setParseMessage(`${session.rows.length} Zeilen aus der Datenbank wiederhergestellt.`);
+      })
+      .catch(() => {
+        setParseMessage("Gespeicherte Importsitzung konnte nicht aus der Datenbank geladen werden.");
+      });
   }, []);
 
   useEffect(() => {
     if (!rows.length && !job) return;
 
-    const repository = createBrowserImportSessionRepository(window.localStorage);
-    const session = repository.save({ fileName, rows, sources, job, workflowLog });
-    setLastSavedAt(session.savedAt);
+    const repository = createHttpImportSessionRepository();
+    repository.save({ fileName, rows, sources, job, workflowLog })
+      .then((session) => setLastSavedAt(session.savedAt))
+      .catch(() => setParseMessage("Importsitzung konnte nicht in der Datenbank gespeichert werden."));
   }, [fileName, rows, sources, job, workflowLog]);
 
   const summary = useMemo(() => matchPublications(sources, demoDimensionsCandidates), [sources]);
@@ -105,7 +106,8 @@ export function ImportWorkbench() {
   }
 
   function clearSession() {
-    createBrowserImportSessionRepository(window.localStorage).clear();
+    createHttpImportSessionRepository().clear()
+      .catch(() => setParseMessage("Importsitzung konnte nicht aus der Datenbank gelöscht werden."));
     setFileName("");
     setRows([]);
     setSources([]);
@@ -166,7 +168,7 @@ export function ImportWorkbench() {
         <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={(event) => handleFile(event.target.files?.[0])} />
       </label>
       <p className="muted">{parseMessage}</p>
-      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird lokal im Browser gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. Für produktive Läufe ist die Schnittstelle so vorbereitet, dass später serverseitig DuckDB, SQLite/Postgres oder ein Objekt-Storage angebunden werden kann.</p>
+      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird serverseitig in einer SQLite-Datenbank gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. DuckDB wäre für spätere analytische Auswertungen gut geeignet; für diesen Prototyp nutzt die Persistenz ohne zusätzliche native npm-Abhängigkeit SQLite.</p>
 
       <div className="cards compact" aria-label="Importsichtung">
         <article><strong>{sources.length}</strong><span>Zeilen erkannt</span></article>
