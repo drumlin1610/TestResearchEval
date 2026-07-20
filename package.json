@@ -10,10 +10,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "next": "^15.4.2",
+    "next": "^15.5.20",
     "papaparse": "^5.5.3",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@types/node": "^24.0.15",
@@ -22,5 +22,23 @@
     "@types/react-dom": "^19.1.6",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
-  }
+  },
+  "description": "Next.js-Prototyp für die Forschungsevaluation: BORIS-Portal-Exporte werden über DOI, PubMed-ID und Titel gegen Dimensions-Publikationen gematcht. Die Kernlogik ist in `lib/dimensions-matching` gekapselt, damit sie später als wiederverwendbare Library oder npm-Package ausgelagert werden kann.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drumlin1610/TestResearchEval.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/drumlin1610/TestResearchEval/issues"
+  },
+  "homepage": "https://github.com/drumlin1610/TestResearchEval#readme"
 }
