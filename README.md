@@ -25,12 +25,8 @@ Dimensions auf BigQuery ist ein subscription-only Dataset; die offizielle Dokume
 
 ## Persistenzstrategie für Imports
 
-Der aktuelle Prototyp speichert hochgeladene BORIS-Imports und den angelegten Auftrag zunächst im Browser-`localStorage`. Das reicht für eine erste UX-Validierung: Ein Reload verliert die Sichtung, den Auftrag und den Prozessstatus nicht sofort, ohne dass zusätzliche Infrastruktur nötig ist.
+Der aktuelle Prototyp speichert hochgeladene BORIS-Imports und den angelegten Auftrag serverseitig in `data/research-eval.duckdb`. Die DuckDB-Schicht passt zum zweistufigen Workflow: Dimensions/GBQ-Jahresexporte der UniBE können als CSV-Snapshot geladen und danach lokal gegen BORIS-Exporte gematcht werden.
 
-Für produktive Imports sollte diese Schicht serverseitig ersetzt werden:
+Die DuckDB-Anbindung nutzt den offiziellen Node.js Client `@duckdb/node-api`, sodass keine separate DuckDB-CLI im `PATH` benötigt wird. Die Route `POST /api/dimensions-snapshot` erwartet ein Multipart-Formular mit `file`, `year` und optional `snapshotId`. Der CSV-Import nutzt `read_csv_auto` und legt normalisierte Lookup-Spalten für DOI, PubMed-ID und Titel in `dimensions_publications` an. Erwartete CSV-Spalten sind `id`, `doi`, `pubmed_id`, `title` und `year`. Falls beim Start noch `spawn duckdb ENOENT` erscheint, läuft noch ein alter CLI-basierter Build/Dev-Server; bitte den Next.js-Prozess stoppen, `.next` löschen und nach `npm install` neu starten.
 
-- **DuckDB** eignet sich sehr gut für explorative Datenprofile, CSV/Parquet-Verarbeitung, lokale Batch-Jobs und reproduzierbare Zwischenstände pro Auftrag.
-- **Postgres oder SQLite** sind sinnvoller, wenn mehrere Benutzer gleichzeitig Aufträge verwalten, Statusänderungen auditierbar sein müssen oder Review-Entscheide dauerhaft gespeichert werden.
-- **Objekt-Storage plus Metadaten-Datenbank** ist die robusteste Variante für grosse BORIS-Exports: Originaldatei versioniert ablegen, Profiling-/Matching-Artefakte als Parquet/JSON speichern und nur Job-Metadaten relational verwalten.
-
-Empfohlener nächster Schritt: eine kleine `ImportSessionRepository`-Schnittstelle einführen und die aktuelle Browser-Persistenz durch eine serverseitige Implementierung ersetzen. DuckDB kann dann als Analyse-Engine hinter dieser Schnittstelle genutzt werden, ohne die Oberfläche erneut umzubauen.
+Für produktive Imports bleibt Objekt-Storage plus Metadaten-Datenbank sinnvoll, wenn Originaldateien versioniert abgelegt werden sollen. DuckDB übernimmt dabei die analytische Schicht für CSV/Parquet-Verarbeitung, lokale Batch-Jobs und reproduzierbare Zwischenstände pro Auftrag.
