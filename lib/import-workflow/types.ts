@@ -2,6 +2,15 @@ import type { SourcePublication } from "@/lib/dimensions-matching";
 
 export type ImportRow = Record<string, string>;
 export type JobStatus = "draft" | "ready" | "running" | "completed";
+export type WorkflowLogLevel = "info" | "success" | "warning" | "error";
+
+export type WorkflowLogEntry = {
+  id: string;
+  at: string;
+  level: WorkflowLogLevel;
+  message: string;
+  details?: string;
+};
 
 export type ImportJob = {
   id: string;
@@ -17,11 +26,21 @@ export type PersistedImportSession = {
   rows: ImportRow[];
   sources: SourcePublication[];
   job: ImportJob | null;
+  workflowLog: WorkflowLogEntry[];
   savedAt: string;
 };
 
+export type ImportSessionDraft = Omit<PersistedImportSession, "savedAt">;
+
 export type ImportSessionRepository = {
   load(): PersistedImportSession | null;
-  save(session: Omit<PersistedImportSession, "savedAt">): PersistedImportSession;
+  save(session: ImportSessionDraft): PersistedImportSession;
   clear(): void;
+};
+
+
+export type AsyncImportSessionRepository = {
+  load(): Promise<PersistedImportSession | null>;
+  save(session: ImportSessionDraft): Promise<PersistedImportSession>;
+  clear(): Promise<void>;
 };

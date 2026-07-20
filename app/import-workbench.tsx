@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { matchPublications, type SourcePublication } from "@/lib/dimensions-matching";
-import { createBrowserImportSessionRepository } from "@/lib/import-workflow/browser-repository";
+import { createHttpImportSessionRepository } from "@/lib/import-workflow/http-repository";
 import {
   borisFieldDefinitions,
   detectBorisColumns,
   getMissingRequiredBorisFields,
   mapRowsToBorisPublications,
 } from "@/lib/import-workflow/boris-schema";
-import type { ImportJob, ImportRow, JobStatus } from "@/lib/import-workflow/types";
+import type { ImportJob, ImportRow, JobStatus, WorkflowLogEntry, WorkflowLogLevel } from "@/lib/import-workflow/types";
 
 const demoDimensionsCandidates = [
   { id: "pub.1", doi: "10.1000/demo.1", title: "Research evaluation with reliable metadata", year: 2024 },
@@ -32,32 +32,35 @@ export function ImportWorkbench() {
   const [parseMessage, setParseMessage] = useState("Noch kein BORIS-Export geladen.");
   const [job, setJob] = useState<ImportJob | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [workflowLog, setWorkflowLog] = useState<WorkflowLogEntry[]>([]);
 
   useEffect(() => {
-    const repository = createBrowserImportSessionRepository(window.localStorage);
+    const repository = createHttpImportSessionRepository();
 
-    try {
-      const session = repository.load();
-      if (!session) return;
-      setFileName(session.fileName);
-      setRows(session.rows);
-      setSources(session.sources);
-      setJob(session.job);
-      setLastSavedAt(session.savedAt);
-      setParseMessage(`${session.rows.length} Zeilen aus dem lokalen Zwischenspeicher wiederhergestellt.`);
-    } catch {
-      createBrowserImportSessionRepository(window.localStorage).clear();
-      setParseMessage("Gespeicherte Importsitzung war ungültig und wurde verworfen.");
-    }
+    repository.load()
+      .then((session) => {
+        if (!session) return;
+        setFileName(session.fileName);
+        setRows(session.rows);
+        setSources(session.sources);
+        setJob(session.job);
+        setLastSavedAt(session.savedAt);
+        setWorkflowLog(session.workflowLog);
+        setParseMessage(`${session.rows.length} Zeilen aus der Datenbank wiederhergestellt.`);
+      })
+      .catch(() => {
+        setParseMessage("Gespeicherte Importsitzung konnte nicht aus der Datenbank geladen werden.");
+      });
   }, []);
 
   useEffect(() => {
     if (!rows.length && !job) return;
 
-    const repository = createBrowserImportSessionRepository(window.localStorage);
-    const session = repository.save({ fileName, rows, sources, job });
-    setLastSavedAt(session.savedAt);
-  }, [fileName, rows, sources, job]);
+    const repository = createHttpImportSessionRepository();
+    repository.save({ fileName, rows, sources, job, workflowLog })
+      .then((session) => setLastSavedAt(session.savedAt))
+      .catch(() => setParseMessage("Importsitzung konnte nicht in der Datenbank gespeichert werden."));
+  }, [fileName, rows, sources, job, workflowLog]);
 
   const summary = useMemo(() => matchPublications(sources, demoDimensionsCandidates), [sources]);
   const detectedColumns = Object.keys(rows[0] ?? {});
@@ -67,10 +70,23 @@ export function ImportWorkbench() {
   const rowsWithPubmed = sources.filter((source) => source.pubmedId).length;
   const rowsWithTitle = sources.filter((source) => source.title).length;
 
+  const gridColumns = detectedColumns.slice(0, 12);
+
+  function appendWorkflowLog(level: WorkflowLogLevel, message: string, details?: string) {
+    setWorkflowLog((current) => [{
+      id: `log-${Date.now()}-${current.length}`,
+      at: new Date().toLocaleString("de-CH"),
+      level,
+      message,
+      details,
+    }, ...current].slice(0, 50));
+  }
+
   function handleFile(file?: File) {
     if (!file) return;
     setFileName(file.name);
     setJob(null);
+    appendWorkflowLog("info", "Datei für Import ausgewählt", file.name);
     Papa.parse<ImportRow>(file, {
       header: true,
       skipEmptyLines: true,
@@ -80,30 +96,38 @@ export function ImportWorkbench() {
         setRows(parsedRows);
         setSources(mapRowsToBorisPublications(parsedRows));
         setParseMessage(`${parsedRows.length} Zeilen aus ${file.name} gelesen.`);
+        appendWorkflowLog("success", "BORIS-Export gelesen", `${parsedRows.length} Zeilen, ${Object.keys(parsedRows[0] ?? {}).length} Spalten`);
       },
-      error: (error) => setParseMessage(`Import fehlgeschlagen: ${error.message}`),
+      error: (error) => {
+        setParseMessage(`Import fehlgeschlagen: ${error.message}`);
+        appendWorkflowLog("error", "Import fehlgeschlagen", error.message);
+      },
     });
   }
 
   function clearSession() {
-    createBrowserImportSessionRepository(window.localStorage).clear();
+    createHttpImportSessionRepository().clear()
+      .catch(() => setParseMessage("Importsitzung konnte nicht aus der Datenbank gelöscht werden."));
     setFileName("");
     setRows([]);
     setSources([]);
     setJob(null);
     setLastSavedAt(null);
+    setWorkflowLog([]);
     setParseMessage("Importdaten und Auftrag wurden aus dem lokalen Zwischenspeicher entfernt.");
   }
 
   function createJob() {
+    const jobId = `auftrag-${Date.now()}`;
     setJob({
-      id: `auftrag-${Date.now()}`,
+      id: jobId,
       name: fileName ? `BORIS-Import ${fileName}` : "BORIS-Import",
       status: "ready",
       progress: 0,
       createdAt: new Date().toLocaleString("de-CH"),
       currentStep: "Auftrag angelegt, Start wartet auf Freigabe.",
     });
+    appendWorkflowLog("info", "Auftrag erstellt", jobId);
   }
 
   function startJob() {
@@ -116,6 +140,7 @@ export function ImportWorkbench() {
       "Prozess abgeschlossen",
     ];
     setJob({ ...job, status: "running", progress: 8, currentStep: steps[0] });
+    appendWorkflowLog("info", "Workflow gestartet", job.id);
     steps.forEach((step, index) => {
       window.setTimeout(() => {
         setJob((current) => current && {
@@ -124,6 +149,7 @@ export function ImportWorkbench() {
           progress: Math.round(((index + 1) / steps.length) * 100),
           currentStep: step,
         });
+        appendWorkflowLog(index === steps.length - 1 ? "success" : "info", step, `${Math.round(((index + 1) / steps.length) * 100)}% abgeschlossen`);
       }, (index + 1) * 700);
     });
   }
@@ -142,7 +168,7 @@ export function ImportWorkbench() {
         <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={(event) => handleFile(event.target.files?.[0])} />
       </label>
       <p className="muted">{parseMessage}</p>
-      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird lokal im Browser gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. Für produktive Läufe ist die Schnittstelle so vorbereitet, dass später serverseitig DuckDB, SQLite/Postgres oder ein Objekt-Storage angebunden werden kann.</p>
+      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird serverseitig in einer SQLite-Datenbank gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. DuckDB wäre für spätere analytische Auswertungen gut geeignet; für diesen Prototyp nutzt die Persistenz ohne zusätzliche native npm-Abhängigkeit SQLite.</p>
 
       <div className="cards compact" aria-label="Importsichtung">
         <article><strong>{sources.length}</strong><span>Zeilen erkannt</span></article>
@@ -191,6 +217,41 @@ export function ImportWorkbench() {
           {job && <div className="job-status"><span>{statusLabels[job.status]}</span><strong>{job.progress}%</strong><progress value={job.progress} max={100} /><p>{job.currentStep}</p><small>{job.name} · {job.createdAt}</small></div>}
         </div>
       </div>
+
+      <div className="workflow-log" aria-live="polite">
+        <h3>Workflow-Logging</h3>
+        <ol>
+          {workflowLog.map((entry) => (
+            <li key={entry.id} className={`log-${entry.level}`}>
+              <time>{entry.at}</time>
+              <strong>{entry.message}</strong>
+              {entry.details && <span>{entry.details}</span>}
+            </li>
+          ))}
+          {!workflowLog.length && <li className="log-empty">Noch keine Workflow-Ereignisse vorhanden.</li>}
+        </ol>
+      </div>
+
+      <h3>Alle Importdaten im Grid</h3>
+      <div className="data-grid" role="region" aria-label="Alle importierten BORIS-Daten" tabIndex={0}>
+        <table>
+          <thead>
+            <tr>
+              {gridColumns.map((column) => <th key={column}>{column}</th>)}
+              {!gridColumns.length && <th>Importdaten</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, rowIndex) => (
+              <tr key={`row-${rowIndex}`}>
+                {gridColumns.map((column) => <td key={`${rowIndex}-${column}`}>{row[column] || "—"}</td>)}
+              </tr>
+            ))}
+            {!rows.length && <tr><td>Nach dem Upload wird jede importierte Zeile in diesem Grid angezeigt.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {detectedColumns.length > gridColumns.length && <p className="muted">Das Grid zeigt die ersten {gridColumns.length} von {detectedColumns.length} Spalten, um die Sichtung lesbar zu halten.</p>}
 
       <h3>Vorläufiges Matching gegen Demo-Dimensions-Daten</h3>
       <table>
