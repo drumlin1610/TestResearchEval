@@ -25,6 +25,8 @@ export async function POST(request: Request) {
     : `dimensions-unibe-${year}`;
   const fileName = typeof body.fileName === "string" && body.fileName.trim() ? body.fileName.trim() : `dimensions-${year}.json`;
 
+  console.info("[dimensions:insert-api] Request accepted", { snapshotId, year, fileName, rows: body.rows.length });
   const rowCount = await importDimensionsSnapshotFromRows({ snapshotId, year, fileName, rows: body.rows });
+  console.info("[dimensions:insert-api] Request completed", { snapshotId, year, fileName, rowCount });
   return NextResponse.json({ snapshotId, year, fileName, rowCount, databasePath: importWorkflowDatabasePath, mode: "insert" });
 }

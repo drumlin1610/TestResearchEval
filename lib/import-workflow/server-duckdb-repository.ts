@@ -35,13 +35,14 @@ async function loadDuckDbApi() {
 async function getConnection(): Promise<DuckDBConnection> {
   if (connectionPromise) return connectionPromise;
 
-  connectionPromise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
+  const promise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
     const { DuckDBInstance } = await loadDuckDbApi();
     const instance = await DuckDBInstance.fromCache(databasePath);
     return await instance.connect();
   });
+  connectionPromise = promise;
 
-  return connectionPromise;
+  return promise;
 }
 
 async function runDuckDbSql(sql: string, values?: Record<string, unknown>) {
@@ -187,19 +188,35 @@ export function buildDimensionsSnapshotInsertSql() {
 }
 
 export async function importDimensionsSnapshotFromRows(options: { snapshotId: string; year: number; fileName: string; rows: DimensionsSnapshotRow[] }) {
+  console.info("[dimensions:insert] Preparing row-based Dimensions snapshot import", {
+    snapshotId: options.snapshotId,
+    year: options.year,
+    fileName: options.fileName,
+    receivedRows: options.rows.length,
+  });
   await ensureDatabase();
+  console.info("[dimensions:insert] DuckDB schema is ready", { snapshotId: options.snapshotId });
   await runDuckDbSql("BEGIN TRANSACTION;");
+  console.info("[dimensions:insert] Transaction started", { snapshotId: options.snapshotId });
 
   try {
     await runDuckDbSql("DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;", { snapshotId: options.snapshotId });
     await runDuckDbSql("DELETE FROM dimensions_snapshots WHERE id = $snapshotId;", { snapshotId: options.snapshotId });
+    console.info("[dimensions:insert] Existing snapshot rows cleared", { snapshotId: options.snapshotId });
 
     const insertPublicationSql = buildDimensionsSnapshotInsertSql();
     let insertedRows = 0;
 
-    for (const row of options.rows) {
+    for (const [rowIndex, row] of options.rows.entries()) {
+      const processedRows = rowIndex + 1;
       const id = getTextValue(row, ["id", "publication_id", "dimensions_id"]);
-      if (!id) continue;
+      if (!id) {
+        console.warn("[dimensions:insert] Skipping row without Dimensions id", {
+          snapshotId: options.snapshotId,
+          rowNumber: processedRows,
+        });
+        continue;
+      }
 
       await runDuckDbSql(insertPublicationSql, {
         id,
@@ -211,6 +228,14 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
         rawPayload: JSON.stringify(row),
       });
       insertedRows += 1;
+      if (insertedRows === 1 || processedRows % 1000 === 0 || processedRows === options.rows.length) {
+        console.info("[dimensions:insert] Insert progress", {
+          snapshotId: options.snapshotId,
+          processedRows,
+          insertedRows,
+          receivedRows: options.rows.length,
+        });
+      }
     }
 
     await runDuckDbSql(`
@@ -218,8 +243,17 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
       VALUES ($snapshotId, $year, $fileName, $rowCount, 'active');
     `, { snapshotId: options.snapshotId, year: options.year, fileName: options.fileName, rowCount: insertedRows });
     await runDuckDbSql("COMMIT;");
+    console.info("[dimensions:insert] Import committed", {
+      snapshotId: options.snapshotId,
+      insertedRows,
+      skippedRows: options.rows.length - insertedRows,
+    });
     return insertedRows;
   } catch (error) {
+    console.error("[dimensions:insert] Import failed; rolling back", {
+      snapshotId: options.snapshotId,
+      error,
+    });
     await runDuckDbSql("ROLLBACK;").catch(() => undefined);
     throw error;
   }
