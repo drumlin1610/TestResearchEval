@@ -168,7 +168,7 @@ export function ImportWorkbench() {
         <input type="file" accept=".csv,.tsv,text/csv,text/tab-separated-values" onChange={(event) => handleFile(event.target.files?.[0])} />
       </label>
       <p className="muted">{parseMessage}</p>
-      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird serverseitig in einer SQLite-Datenbank gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. DuckDB wäre für spätere analytische Auswertungen gut geeignet; für diesen Prototyp nutzt die Persistenz ohne zusätzliche native npm-Abhängigkeit SQLite.</p>
+      <p className="muted"><strong>Persistenz:</strong> Diese Prototyp-Sitzung wird serverseitig in einer DuckDB-Datenbank gespeichert{lastSavedAt ? ` · zuletzt gespeichert: ${lastSavedAt}` : ""}. Dimensions-Jahresexporte können dadurch später direkt als CSV-Snapshot geladen und lokal für das Matching genutzt werden.</p>
 
       <div className="cards compact" aria-label="Importsichtung">
         <article><strong>{sources.length}</strong><span>Zeilen erkannt</span></article>
