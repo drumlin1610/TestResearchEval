@@ -4,41 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 import { matchPublications, type SourcePublication } from "@/lib/dimensions-matching";
 import { createBrowserImportSessionRepository } from "@/lib/import-workflow/browser-repository";
+import {
+  borisFieldDefinitions,
+  detectBorisColumns,
+  getMissingRequiredBorisFields,
+  mapRowsToBorisPublications,
+} from "@/lib/import-workflow/boris-schema";
 import type { ImportJob, ImportRow, JobStatus } from "@/lib/import-workflow/types";
-
-const borisColumnAliases = {
-  borisId: ["borisid", "boris_id", "id", "recordid", "record_id", "publicationid", "publication_id"],
-  doi: ["doi", "digitalobjectidentifier"],
-  pubmedId: ["pubmedid", "pubmed_id", "pmid", "pubmed"],
-  title: ["title", "titel", "publicationtitle", "publication_title"],
-  year: ["year", "jahr", "publicationyear", "publication_year"],
-};
-
-function normalizeHeader(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function findColumn(headers: string[], aliases: string[]) {
-  const normalized = new Map(headers.map((header) => [normalizeHeader(header), header]));
-  return aliases.map((alias) => normalized.get(normalizeHeader(alias))).find(Boolean);
-}
-
-function mapRowsToPublications(rows: ImportRow[]): SourcePublication[] {
-  const headers = Object.keys(rows[0] ?? {});
-  const borisIdColumn = findColumn(headers, borisColumnAliases.borisId);
-  const doiColumn = findColumn(headers, borisColumnAliases.doi);
-  const pubmedColumn = findColumn(headers, borisColumnAliases.pubmedId);
-  const titleColumn = findColumn(headers, borisColumnAliases.title);
-  const yearColumn = findColumn(headers, borisColumnAliases.year);
-
-  return rows.map((row, index) => ({
-    borisId: row[borisIdColumn ?? ""] || `BORIS-IMPORT-${index + 1}`,
-    doi: doiColumn ? row[doiColumn] : undefined,
-    pubmedId: pubmedColumn ? row[pubmedColumn] : undefined,
-    title: titleColumn ? row[titleColumn] : undefined,
-    year: yearColumn && row[yearColumn] ? Number(row[yearColumn]) : undefined,
-  }));
-}
 
 const demoDimensionsCandidates = [
   { id: "pub.1", doi: "10.1000/demo.1", title: "Research evaluation with reliable metadata", year: 2024 },
@@ -89,6 +61,8 @@ export function ImportWorkbench() {
 
   const summary = useMemo(() => matchPublications(sources, demoDimensionsCandidates), [sources]);
   const detectedColumns = Object.keys(rows[0] ?? {});
+  const borisColumnMapping = detectBorisColumns(detectedColumns);
+  const missingRequiredFields = getMissingRequiredBorisFields(borisColumnMapping);
   const rowsWithDoi = sources.filter((source) => source.doi).length;
   const rowsWithPubmed = sources.filter((source) => source.pubmedId).length;
   const rowsWithTitle = sources.filter((source) => source.title).length;
@@ -104,7 +78,7 @@ export function ImportWorkbench() {
       complete: (result) => {
         const parsedRows = result.data.filter((row) => Object.values(row).some(Boolean));
         setRows(parsedRows);
-        setSources(mapRowsToPublications(parsedRows));
+        setSources(mapRowsToBorisPublications(parsedRows));
         setParseMessage(`${parsedRows.length} Zeilen aus ${file.name} gelesen.`);
       },
       error: (error) => setParseMessage(`Import fehlgeschlagen: ${error.message}`),
@@ -178,6 +152,20 @@ export function ImportWorkbench() {
       </div>
 
       {detectedColumns.length > 0 && <p className="muted"><strong>Erkannte Spalten:</strong> {detectedColumns.join(", ")}</p>}
+      {detectedColumns.length > 0 && (
+        <div className="schema-list">
+          <strong>BORIS-Feldmapping</strong>
+          <ul>
+            {borisFieldDefinitions.map((definition) => (
+              <li key={definition.field}>
+                <span>{definition.label}{definition.required ? " *" : ""}</span>
+                <code>{borisColumnMapping[definition.field] ?? "nicht erkannt"}</code>
+              </li>
+            ))}
+          </ul>
+          {missingRequiredFields.length > 0 && <p className="warning">Fehlende Pflichtfelder: {missingRequiredFields.join(", ")}</p>}
+        </div>
+      )}
 
       <div className="workflow-grid">
         <div>

@@ -6,7 +6,12 @@ Next.js-Prototyp für die Forschungsevaluation: BORIS-Portal-Exporte werden übe
 
 - `app/`: deutschsprachige Oberfläche mit Kennzahlen, Workflow und Demo-Resultaten.
 - `lib/dimensions-matching/`: frameworkunabhängige Matching-Library mit Normalisierung, Confidence-Scoring, Summary-Metriken und BigQuery-Query-Builder.
+- `lib/import-workflow/`: Import-Schema für BORIS-Spalten, Import-Session-Typen und Persistenz-Repository für die Workbench.
 - `test/`: Vitest-Spezifikation für die wichtigsten Matching-Regeln.
+
+## BORIS-Import-Schema
+
+Die Spalten, die aus einem BORIS-Export gelesen werden, sind zentral in `lib/import-workflow/boris-schema.ts` definiert. Dort werden fachliche Zielfelder, Pflichtfeld-Status und mögliche Spalten-Aliases gepflegt. Die Workbench zeigt nach dem Upload das erkannte Mapping an, damit fehlende oder anders benannte BORIS-Spalten sofort sichtbar werden.
 
 ## Dimensions/GBQ Ansatz
 
