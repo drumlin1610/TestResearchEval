@@ -17,3 +17,15 @@ Dimensions auf BigQuery ist ein subscription-only Dataset; die offizielle Dokume
 1. Welche BORIS-Spaltennamen sind im Export verbindlich?
 2. Soll Titel-Matching rein deterministisch bleiben oder später durch Embeddings/LLM-Review ergänzt werden?
 3. Welche Confidence-Schwellen sollen automatisch akzeptiert, manuell geprüft oder abgelehnt werden?
+
+## Persistenzstrategie für Imports
+
+Der aktuelle Prototyp speichert hochgeladene BORIS-Imports und den angelegten Auftrag zunächst im Browser-`localStorage`. Das reicht für eine erste UX-Validierung: Ein Reload verliert die Sichtung, den Auftrag und den Prozessstatus nicht sofort, ohne dass zusätzliche Infrastruktur nötig ist.
+
+Für produktive Imports sollte diese Schicht serverseitig ersetzt werden:
+
+- **DuckDB** eignet sich sehr gut für explorative Datenprofile, CSV/Parquet-Verarbeitung, lokale Batch-Jobs und reproduzierbare Zwischenstände pro Auftrag.
+- **Postgres oder SQLite** sind sinnvoller, wenn mehrere Benutzer gleichzeitig Aufträge verwalten, Statusänderungen auditierbar sein müssen oder Review-Entscheide dauerhaft gespeichert werden.
+- **Objekt-Storage plus Metadaten-Datenbank** ist die robusteste Variante für grosse BORIS-Exports: Originaldatei versioniert ablegen, Profiling-/Matching-Artefakte als Parquet/JSON speichern und nur Job-Metadaten relational verwalten.
+
+Empfohlener nächster Schritt: eine kleine `ImportSessionRepository`-Schnittstelle einführen und die aktuelle Browser-Persistenz durch eine serverseitige Implementierung ersetzen. DuckDB kann dann als Analyse-Engine hinter dieser Schnittstelle genutzt werden, ohne die Oberfläche erneut umzubauen.
