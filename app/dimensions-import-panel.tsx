@@ -22,7 +22,19 @@ type DirectCsvPreview = {
   rowCount: number;
 };
 
-const requiredColumns = ["id", "doi", "pubmed_id", "title", "year"];
+const requiredColumnAliases = {
+  id: ["id", "publication_id", "publicationId", "dimensions_id", "Dimensions ID", "Publication ID"],
+  doi: ["doi", "DOI"],
+  pubmed_id: ["pubmed_id", "pubmedId", "pmid", "PMID", "PubMed ID"],
+  title: ["title", "Title"],
+  year: ["year", "publication_year", "publicationYear", "Year", "Publication Year"],
+} as const;
+
+function missingRequiredDimensionsFields(columns: string[]) {
+  return Object.entries(requiredColumnAliases)
+    .filter(([, aliases]) => !aliases.some((alias) => columns.includes(alias)))
+    .map(([field]) => field);
+}
 
 export function DimensionsImportPanel() {
   const [file, setFile] = useState<File | null>(null);
@@ -105,7 +117,7 @@ export function DimensionsImportPanel() {
 
     try {
       const parsed = await parseSelectedCsv();
-      const missingColumns = requiredColumns.filter((column) => !parsed.columns.includes(column));
+      const missingColumns = missingRequiredDimensionsFields(parsed.columns);
 
       setDirectPreview({ ...parsed, rows: parsed.rows.slice(0, 5) });
       setState(missingColumns.length ? "error" : "success");
@@ -242,7 +254,7 @@ export function DimensionsImportPanel() {
           <li><span>Direktmodus</span><code>Browser-CSV ohne Server</code></li>
           <li><span>Große Exporte</span><code>Parquet statt CSV empfohlen</code></li>
         </ul>
-        <p className="muted">Für den DuckDB-Import werden aktuell <code>id</code>, <code>doi</code>, <code>pubmed_id</code>, <code>title</code> und <code>year</code> erwartet.</p>
+        <p className="muted">Für den DuckDB-Import werden <code>id</code>, <code>doi</code>, <code>pubmed_id</code>, <code>title</code> und <code>year</code> erwartet; gängige Dimensions-Aliases wie <code>Publication ID</code>, <code>PubMed ID</code> und <code>Publication Year</code> werden ebenfalls akzeptiert.</p>
       </div>
     </section>
   );
