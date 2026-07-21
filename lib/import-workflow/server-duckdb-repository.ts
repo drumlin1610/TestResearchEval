@@ -12,6 +12,8 @@ type DuckDBInstance = {
   connect(): Promise<DuckDBConnection>;
 };
 
+export type DimensionsSnapshotRow = Record<string, unknown>;
+
 type DuckDBNodeApi = {
   DuckDBInstance: {
     fromCache(databasePath: string): Promise<DuckDBInstance>;
@@ -30,16 +32,17 @@ async function loadDuckDbApi() {
   return await import(/* webpackIgnore: true */ duckDbPackageName) as DuckDBNodeApi;
 }
 
-async function getConnection() {
+async function getConnection(): Promise<DuckDBConnection> {
   if (connectionPromise) return connectionPromise;
 
-  connectionPromise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
+  const promise = mkdir(databaseDirectory, { recursive: true }).then(async () => {
     const { DuckDBInstance } = await loadDuckDbApi();
     const instance = await DuckDBInstance.fromCache(databasePath);
     return await instance.connect();
   });
+  connectionPromise = promise;
 
-  return connectionPromise;
+  return promise;
 }
 
 async function runDuckDbSql(sql: string, values?: Record<string, unknown>) {
@@ -53,44 +56,86 @@ async function readDuckDbRows<Row>(sql: string, values?: Record<string, unknown>
   return reader.getRowObjects() as Row[];
 }
 
+async function initializeDatabase() {
+  console.info("[duckdb:init] Ensuring DuckDB schema", { databasePath });
+
+  const statements = [
+    {
+      label: "import_sessions table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS import_sessions (
+          session_key VARCHAR PRIMARY KEY,
+          payload JSON NOT NULL,
+          saved_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        );
+      `,
+    },
+    {
+      label: "dimensions_snapshots table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dimensions_snapshots (
+          id VARCHAR PRIMARY KEY,
+          year INTEGER NOT NULL,
+          file_name VARCHAR NOT NULL,
+          imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+          row_count INTEGER NOT NULL,
+          status VARCHAR NOT NULL DEFAULT 'active'
+        );
+      `,
+    },
+    {
+      label: "dimensions_publications table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dimensions_publications (
+          id VARCHAR PRIMARY KEY,
+          snapshot_id VARCHAR NOT NULL,
+          doi VARCHAR,
+          pubmed_id VARCHAR,
+          title VARCHAR,
+          normalized_doi VARCHAR,
+          normalized_pubmed_id VARCHAR,
+          normalized_title VARCHAR,
+          year INTEGER,
+          raw_payload JSON NOT NULL,
+          imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        );
+      `,
+    },
+    {
+      label: "dimensions_publications DOI index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_doi ON dimensions_publications(normalized_doi);",
+    },
+    {
+      label: "dimensions_publications PubMed index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_pubmed ON dimensions_publications(normalized_pubmed_id);",
+    },
+    {
+      label: "dimensions_publications title index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_title ON dimensions_publications(normalized_title);",
+    },
+    {
+      label: "dimensions_publications snapshot index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_snapshot ON dimensions_publications(snapshot_id);",
+    },
+  ];
+
+  for (const statement of statements) {
+    console.info("[duckdb:init] Running schema statement", { label: statement.label });
+    await runDuckDbSql(statement.sql);
+    console.info("[duckdb:init] Schema statement completed", { label: statement.label });
+  }
+
+  console.info("[duckdb:init] DuckDB schema ready", { databasePath });
+}
+
 async function ensureDatabase() {
   if (databaseReadyPromise) return databaseReadyPromise;
 
-  databaseReadyPromise = runDuckDbSql(`
-    CREATE TABLE IF NOT EXISTS import_sessions (
-      session_key VARCHAR PRIMARY KEY,
-      payload JSON NOT NULL,
-      saved_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-    );
-
-    CREATE TABLE IF NOT EXISTS dimensions_snapshots (
-      id VARCHAR PRIMARY KEY,
-      year INTEGER NOT NULL,
-      file_name VARCHAR NOT NULL,
-      imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
-      row_count INTEGER NOT NULL,
-      status VARCHAR NOT NULL DEFAULT 'active'
-    );
-
-    CREATE TABLE IF NOT EXISTS dimensions_publications (
-      id VARCHAR PRIMARY KEY,
-      snapshot_id VARCHAR NOT NULL,
-      doi VARCHAR,
-      pubmed_id VARCHAR,
-      title VARCHAR,
-      normalized_doi VARCHAR,
-      normalized_pubmed_id VARCHAR,
-      normalized_title VARCHAR,
-      year INTEGER,
-      raw_payload JSON NOT NULL,
-      imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_doi ON dimensions_publications(normalized_doi);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_pubmed ON dimensions_publications(normalized_pubmed_id);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_title ON dimensions_publications(normalized_title);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_snapshot ON dimensions_publications(snapshot_id);
-  `);
+  databaseReadyPromise = initializeDatabase().catch((error) => {
+    databaseReadyPromise = null;
+    console.error("[duckdb:init] DuckDB schema initialization failed", { databasePath, error });
+    throw error;
+  });
 
   return databaseReadyPromise;
 }
@@ -138,6 +183,130 @@ export function buildDimensionsSnapshotImportSql() {
 export async function importDimensionsSnapshotFromCsv(options: { csvPath: string; snapshotId: string; year: number; fileName: string }) {
   await ensureDatabase();
   await runDuckDbSql(buildDimensionsSnapshotImportSql(), options);
+}
+
+function getTextValue(row: DimensionsSnapshotRow, keys: string[]) {
+  for (const key of keys) {
+    const value = row[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function getIntegerValue(row: DimensionsSnapshotRow, keys: string[], fallback: number) {
+  const value = getTextValue(row, keys);
+  const parsed = Number(value);
+  return Number.isInteger(parsed) ? parsed : fallback;
+}
+
+export function buildDimensionsSnapshotInsertSql() {
+  return `
+    INSERT INTO dimensions_publications (
+      id,
+      snapshot_id,
+      doi,
+      pubmed_id,
+      title,
+      normalized_doi,
+      normalized_pubmed_id,
+      normalized_title,
+      year,
+      raw_payload
+    ) VALUES (
+      $id,
+      $snapshotId,
+      $doi,
+      $pubmedId,
+      $title,
+      lower(regexp_replace(regexp_replace(coalesce($doi, ''), '^https?://(dx\\.)?doi\\.org/', ''), '^doi:', '')),
+      regexp_replace(coalesce($pubmedId, ''), '[^0-9]', '', 'g'),
+      lower(regexp_replace(coalesce($title, ''), '[^[:alnum:] ]', ' ', 'g')),
+      $publicationYear,
+      $rawPayload::JSON
+    );
+  `;
+}
+
+export async function importDimensionsSnapshotFromRows(options: { snapshotId: string; year: number; fileName: string; rows: DimensionsSnapshotRow[] }) {
+  console.info("[dimensions:insert] Preparing row-based Dimensions snapshot import", {
+    snapshotId: options.snapshotId,
+    year: options.year,
+    fileName: options.fileName,
+    receivedRows: options.rows.length,
+  });
+  await ensureDatabase();
+  console.info("[dimensions:insert] DuckDB schema is ready", { snapshotId: options.snapshotId });
+
+  try {
+    console.info("[dimensions:insert] Clearing existing publication rows", { snapshotId: options.snapshotId });
+    await runDuckDbSql("DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;", { snapshotId: options.snapshotId });
+    console.info("[dimensions:insert] Existing publication rows cleared", { snapshotId: options.snapshotId });
+
+    console.info("[dimensions:insert] Clearing existing snapshot metadata", { snapshotId: options.snapshotId });
+    await runDuckDbSql("DELETE FROM dimensions_snapshots WHERE id = $snapshotId;", { snapshotId: options.snapshotId });
+    console.info("[dimensions:insert] Existing snapshot metadata cleared", { snapshotId: options.snapshotId });
+
+    const insertPublicationSql = buildDimensionsSnapshotInsertSql();
+    let insertedRows = 0;
+
+    for (const [rowIndex, row] of options.rows.entries()) {
+      const processedRows = rowIndex + 1;
+      const id = getTextValue(row, ["id", "publication_id", "dimensions_id"]);
+      if (!id) {
+        console.warn("[dimensions:insert] Skipping row without Dimensions id", {
+          snapshotId: options.snapshotId,
+          rowNumber: processedRows,
+        });
+        continue;
+      }
+
+      if (insertedRows === 0) {
+        console.info("[dimensions:insert] Starting row inserts", { snapshotId: options.snapshotId });
+      }
+
+      await runDuckDbSql(insertPublicationSql, {
+        id,
+        snapshotId: options.snapshotId,
+        doi: getTextValue(row, ["doi", "DOI"]),
+        pubmedId: getTextValue(row, ["pubmed_id", "pubmedId", "pmid", "PMID"]),
+        title: getTextValue(row, ["title", "Title"]),
+        publicationYear: getIntegerValue(row, ["year", "publication_year", "publicationYear"], options.year),
+        rawPayload: JSON.stringify(row),
+      });
+      insertedRows += 1;
+      if (insertedRows === 1 || processedRows % 1000 === 0 || processedRows === options.rows.length) {
+        console.info("[dimensions:insert] Insert progress", {
+          snapshotId: options.snapshotId,
+          processedRows,
+          insertedRows,
+          receivedRows: options.rows.length,
+        });
+      }
+    }
+
+    console.info("[dimensions:insert] Writing snapshot metadata", {
+      snapshotId: options.snapshotId,
+      insertedRows,
+    });
+    await runDuckDbSql(`
+      INSERT INTO dimensions_snapshots (id, year, file_name, row_count, status)
+      VALUES ($snapshotId, $year, $fileName, $rowCount, 'active');
+    `, { snapshotId: options.snapshotId, year: options.year, fileName: options.fileName, rowCount: insertedRows });
+    console.info("[dimensions:insert] Import completed", {
+      snapshotId: options.snapshotId,
+      insertedRows,
+      skippedRows: options.rows.length - insertedRows,
+    });
+    return insertedRows;
+  } catch (error) {
+    console.error("[dimensions:insert] Import failed", {
+      snapshotId: options.snapshotId,
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function createDuckDbImportSessionRepository(): Promise<AsyncImportSessionRepository> {
