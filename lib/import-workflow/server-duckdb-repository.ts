@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { AsyncImportSessionRepository } from "./types";
+import type { DimensionsPublication } from "@/lib/dimensions-matching";
 import {
   createPersistedImportSession,
   importSessionStorageKey,
@@ -515,6 +516,11 @@ export type DimensionsSnapshotStatistics = {
   yearStatistics: DimensionsSnapshotYearStatistic[];
 };
 
+export type DimensionsMatchingCandidateOptions = {
+  snapshotId?: string;
+  limit?: number;
+};
+
 function toNumber(value: unknown) {
   if (typeof value === "bigint") {
     return Number(value);
@@ -888,6 +894,40 @@ export function buildDimensionsSnapshotStatisticsSql() {
   };
 }
 
+export function buildDimensionsMatchingCandidatesSql(options: DimensionsMatchingCandidateOptions = {}) {
+  const snapshotFilter = options.snapshotId ? "AND publication.snapshot_id = $snapshotId" : "";
+
+  return `
+    SELECT
+      publication.id,
+      nullif(publication.doi, '') AS doi,
+      nullif(publication.pubmed_id, '') AS pubmedId,
+      nullif(publication.title, '') AS title,
+      publication.year
+    FROM dimensions_publications publication
+    INNER JOIN dimensions_snapshots snapshot
+      ON snapshot.id = publication.snapshot_id
+    WHERE snapshot.status = 'active'
+      ${snapshotFilter}
+    ORDER BY publication.imported_at DESC, publication.id
+    LIMIT $limit;
+  `;
+}
+
+export function buildDimensionsMatchingCandidateParams(options: DimensionsMatchingCandidateOptions = {}) {
+  const requestedLimit = options.limit ?? Number(process.env.DIMENSIONS_MATCHING_CANDIDATE_LIMIT ?? 50_000);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.floor(requestedLimit)
+    : 50_000;
+  const values: Record<string, unknown> = { limit };
+
+  if (options.snapshotId) {
+    values.snapshotId = options.snapshotId;
+  }
+
+  return values;
+}
+
 export async function getDimensionsSnapshotStatistics(): Promise<DimensionsSnapshotStatistics> {
   await ensureDatabase();
 
@@ -935,6 +975,32 @@ export async function getDimensionsSnapshotStatistics(): Promise<DimensionsSnaps
       };
     }),
   };
+}
+
+export async function getDimensionsMatchingCandidates(
+  options: DimensionsMatchingCandidateOptions = {},
+): Promise<DimensionsPublication[]> {
+  await ensureDatabase();
+
+  const rows = await readDuckDbRows<{
+    id: string;
+    doi?: string | null;
+    pubMedId?: string | null;
+    pubmedId?: string | null;
+    title?: string | null;
+    year?: unknown;
+  }>(
+    buildDimensionsMatchingCandidatesSql(options),
+    buildDimensionsMatchingCandidateParams(options),
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    doi: row.doi ?? undefined,
+    pubmedId: row.pubmedId ?? row.pubMedId ?? undefined,
+    title: row.title ?? undefined,
+    year: row.year === null || row.year === undefined ? undefined : toNumber(row.year),
+  }));
 }
 
 export async function createDuckDbImportSessionRepository(): Promise<AsyncImportSessionRepository> {
