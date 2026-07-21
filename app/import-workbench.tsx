@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Papa from "papaparse";
-import { matchPublications, type SourcePublication } from "@/lib/dimensions-matching";
+import type { MatchSummary, SourcePublication } from "@/lib/dimensions-matching";
 import { createHttpImportSessionRepository } from "@/lib/import-workflow/http-repository";
 import {
   borisFieldDefinitions,
@@ -12,17 +12,21 @@ import {
 } from "@/lib/import-workflow/boris-schema";
 import type { ImportJob, ImportRow, JobStatus, WorkflowLogEntry, WorkflowLogLevel } from "@/lib/import-workflow/types";
 
-const demoDimensionsCandidates = [
-  { id: "pub.1", doi: "10.1000/demo.1", title: "Research evaluation with reliable metadata", year: 2024 },
-  { id: "pub.2", pubmedId: "987654", title: "Biomedical impact analysis", year: 2023 },
-  { id: "pub.3", doi: "10.5281/zenodo.42", title: "Open science metrics for institutional reports", year: 2022 },
-];
-
 const statusLabels: Record<JobStatus, string> = {
   draft: "Entwurf",
   ready: "Bereit",
   running: "Läuft",
   completed: "Abgeschlossen",
+};
+
+const emptyMatchSummary: MatchSummary = {
+  total: 0,
+  matched: 0,
+  unmatched: 0,
+  matchRate: 0,
+  averageConfidence: 0,
+  byMethod: { doi: 0, pubmedId: 0, title: 0, unmatched: 0 },
+  results: [],
 };
 
 export function ImportWorkbench() {
@@ -33,6 +37,9 @@ export function ImportWorkbench() {
   const [job, setJob] = useState<ImportJob | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [workflowLog, setWorkflowLog] = useState<WorkflowLogEntry[]>([]);
+  const [summary, setSummary] = useState<MatchSummary>(emptyMatchSummary);
+  const [matchingMessage, setMatchingMessage] = useState("Noch keine BORIS-Daten für das DuckDB-Matching geladen.");
+  const [matchingCandidateCount, setMatchingCandidateCount] = useState(0);
 
   useEffect(() => {
     const repository = createHttpImportSessionRepository();
@@ -62,7 +69,43 @@ export function ImportWorkbench() {
       .catch(() => setParseMessage("Importsitzung konnte nicht in der Datenbank gespeichert werden."));
   }, [fileName, rows, sources, job, workflowLog]);
 
-  const summary = useMemo(() => matchPublications(sources, demoDimensionsCandidates), [sources]);
+  useEffect(() => {
+    if (!sources.length) {
+      setSummary(emptyMatchSummary);
+      setMatchingCandidateCount(0);
+      setMatchingMessage("Noch keine BORIS-Daten für das DuckDB-Matching geladen.");
+      return;
+    }
+
+    const controller = new AbortController();
+    setMatchingMessage("Matching gegen importierte Dimensions-Daten aus DuckDB läuft.");
+
+    fetch("/api/matching/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null) as { summary?: MatchSummary; candidateCount?: number; error?: string } | null;
+        if (!response.ok || !payload?.summary) {
+          throw new Error(payload?.error ?? `Matching fehlgeschlagen (${response.status}).`);
+        }
+
+        setSummary(payload.summary);
+        setMatchingCandidateCount(payload.candidateCount ?? 0);
+        setMatchingMessage(`${payload.candidateCount ?? 0} importierte Dimensions-Kandidaten aus DuckDB verglichen.`);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        setSummary(emptyMatchSummary);
+        setMatchingCandidateCount(0);
+        setMatchingMessage(error instanceof Error ? error.message : "Matching gegen DuckDB-Daten fehlgeschlagen.");
+      });
+
+    return () => controller.abort();
+  }, [sources]);
+
   const detectedColumns = Object.keys(rows[0] ?? {});
   const borisColumnMapping = detectBorisColumns(detectedColumns);
   const missingRequiredFields = getMissingRequiredBorisFields(borisColumnMapping);
@@ -253,7 +296,8 @@ export function ImportWorkbench() {
       </div>
       {detectedColumns.length > gridColumns.length && <p className="muted">Das Grid zeigt die ersten {gridColumns.length} von {detectedColumns.length} Spalten, um die Sichtung lesbar zu halten.</p>}
 
-      <h3>Vorläufiges Matching gegen Demo-Dimensions-Daten</h3>
+      <h3>Matching gegen importierte Dimensions-Daten</h3>
+      <p className="muted">{matchingMessage}{matchingCandidateCount > 0 ? ` · Kandidaten: ${matchingCandidateCount}` : ""}</p>
       <table>
         <thead><tr><th>BORIS-ID</th><th>Methode</th><th>Confidence</th><th>Dimensions ID</th></tr></thead>
         <tbody>
