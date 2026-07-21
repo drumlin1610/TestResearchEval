@@ -56,44 +56,86 @@ async function readDuckDbRows<Row>(sql: string, values?: Record<string, unknown>
   return reader.getRowObjects() as Row[];
 }
 
+async function initializeDatabase() {
+  console.info("[duckdb:init] Ensuring DuckDB schema", { databasePath });
+
+  const statements = [
+    {
+      label: "import_sessions table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS import_sessions (
+          session_key VARCHAR PRIMARY KEY,
+          payload JSON NOT NULL,
+          saved_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        );
+      `,
+    },
+    {
+      label: "dimensions_snapshots table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dimensions_snapshots (
+          id VARCHAR PRIMARY KEY,
+          year INTEGER NOT NULL,
+          file_name VARCHAR NOT NULL,
+          imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
+          row_count INTEGER NOT NULL,
+          status VARCHAR NOT NULL DEFAULT 'active'
+        );
+      `,
+    },
+    {
+      label: "dimensions_publications table",
+      sql: `
+        CREATE TABLE IF NOT EXISTS dimensions_publications (
+          id VARCHAR PRIMARY KEY,
+          snapshot_id VARCHAR NOT NULL,
+          doi VARCHAR,
+          pubmed_id VARCHAR,
+          title VARCHAR,
+          normalized_doi VARCHAR,
+          normalized_pubmed_id VARCHAR,
+          normalized_title VARCHAR,
+          year INTEGER,
+          raw_payload JSON NOT NULL,
+          imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp
+        );
+      `,
+    },
+    {
+      label: "dimensions_publications DOI index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_doi ON dimensions_publications(normalized_doi);",
+    },
+    {
+      label: "dimensions_publications PubMed index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_pubmed ON dimensions_publications(normalized_pubmed_id);",
+    },
+    {
+      label: "dimensions_publications title index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_title ON dimensions_publications(normalized_title);",
+    },
+    {
+      label: "dimensions_publications snapshot index",
+      sql: "CREATE INDEX IF NOT EXISTS idx_dimensions_publications_snapshot ON dimensions_publications(snapshot_id);",
+    },
+  ];
+
+  for (const statement of statements) {
+    console.info("[duckdb:init] Running schema statement", { label: statement.label });
+    await runDuckDbSql(statement.sql);
+    console.info("[duckdb:init] Schema statement completed", { label: statement.label });
+  }
+
+  console.info("[duckdb:init] DuckDB schema ready", { databasePath });
+}
+
 async function ensureDatabase() {
   if (databaseReadyPromise) return databaseReadyPromise;
 
-  databaseReadyPromise = runDuckDbSql(`
-    CREATE TABLE IF NOT EXISTS import_sessions (
-      session_key VARCHAR PRIMARY KEY,
-      payload JSON NOT NULL,
-      saved_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-    );
-
-    CREATE TABLE IF NOT EXISTS dimensions_snapshots (
-      id VARCHAR PRIMARY KEY,
-      year INTEGER NOT NULL,
-      file_name VARCHAR NOT NULL,
-      imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp,
-      row_count INTEGER NOT NULL,
-      status VARCHAR NOT NULL DEFAULT 'active'
-    );
-
-    CREATE TABLE IF NOT EXISTS dimensions_publications (
-      id VARCHAR PRIMARY KEY,
-      snapshot_id VARCHAR NOT NULL,
-      doi VARCHAR,
-      pubmed_id VARCHAR,
-      title VARCHAR,
-      normalized_doi VARCHAR,
-      normalized_pubmed_id VARCHAR,
-      normalized_title VARCHAR,
-      year INTEGER,
-      raw_payload JSON NOT NULL,
-      imported_at TIMESTAMP NOT NULL DEFAULT current_timestamp
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_doi ON dimensions_publications(normalized_doi);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_pubmed ON dimensions_publications(normalized_pubmed_id);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_title ON dimensions_publications(normalized_title);
-    CREATE INDEX IF NOT EXISTS idx_dimensions_publications_snapshot ON dimensions_publications(snapshot_id);
-  `);
+  databaseReadyPromise = initializeDatabase().catch((error) => {
+    databaseReadyPromise = null;
+    console.error("[duckdb:init] DuckDB schema initialization failed", { databasePath, error });
+    throw error;
+  });
 
   return databaseReadyPromise;
 }
