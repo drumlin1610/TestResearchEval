@@ -121,3 +121,8 @@ input:focus { border-color: #0b5cad; box-shadow: 0 0 0 4px rgb(11 92 173 / 12%);
 .dimensions-kpi { margin-top: 18px; padding: 16px; border: 1px solid #d8e2ef; border-radius: 18px; background: #fbfdff; }
 .kpi-summary dd { font-weight: 900; }
 .small-button { padding: 8px 12px; font-size: .86rem; }
+.brand-mark { color: white; text-decoration: none; }
+.page-link-grid { align-items: stretch; }
+.page-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+.page-actions a { display: inline-flex; align-items: center; border-radius: 999px; background: #0b5cad; color: white; font-weight: 800; padding: 12px 18px; text-decoration: none; }
+.page-actions a:hover { background: #084b8e; }
