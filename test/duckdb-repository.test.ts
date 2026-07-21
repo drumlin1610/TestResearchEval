@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql, buildDimensionsSnapshotStatisticsSql } from "../lib/import-workflow/server-duckdb-repository";
+import { buildDimensionsMatchingCandidateParams, buildDimensionsMatchingCandidatesSql, buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql, buildDimensionsSnapshotStatisticsSql } from "../lib/import-workflow/server-duckdb-repository";
 
 describe("DuckDB import workflow repository", () => {
   it("builds a Dimensions CSV snapshot import with normalized lookup columns", () => {
@@ -33,5 +33,23 @@ describe("DuckDB import workflow repository", () => {
     expect(summarySql).toContain("with_doi_count");
     expect(yearSql).toContain("GROUP BY year");
     expect(yearSql).toContain("ORDER BY year DESC NULLS LAST");
+  });
+
+  it("builds a Dimensions matching candidate query for active snapshots", () => {
+    const sql = buildDimensionsMatchingCandidatesSql({ snapshotId: "dimensions-unibe-2024" });
+
+    expect(sql).toContain("FROM dimensions_publications publication");
+    expect(sql).toContain("INNER JOIN dimensions_snapshots snapshot");
+    expect(sql).toContain("snapshot.status = 'active'");
+    expect(sql).toContain("publication.snapshot_id = $snapshotId");
+    expect(sql).toContain("LIMIT $limit");
+  });
+
+  it("does not bind an unused snapshot parameter for all active snapshots", () => {
+    const sql = buildDimensionsMatchingCandidatesSql();
+    const params = buildDimensionsMatchingCandidateParams();
+
+    expect(sql).not.toContain("$snapshotId");
+    expect(params).toEqual({ limit: 50_000 });
   });
 });

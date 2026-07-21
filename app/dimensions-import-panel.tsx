@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Papa from "papaparse";
 
 type ImportState = "idle" | "uploading" | "success" | "error";
@@ -67,6 +67,24 @@ export function DimensionsImportPanel() {
   const [statistics, setStatistics] = useState<DimensionsStatistics | null>(null);
   const [statisticsState, setStatisticsState] = useState<ImportState>("idle");
   const [statisticsMessage, setStatisticsMessage] = useState("KPI werden aus der DuckDB geladen, sobald ein Import vorhanden ist.");
+  const [yearStatisticFilter, setYearStatisticFilter] = useState("");
+  const [directPreviewFilter, setDirectPreviewFilter] = useState("");
+
+  const filteredYearStatistics = useMemo(() => {
+    const normalizedFilter = yearStatisticFilter.trim().toLowerCase();
+    if (!statistics || !normalizedFilter) return statistics?.yearStatistics ?? [];
+
+    return statistics.yearStatistics.filter((statistic) => Object.values(statistic)
+      .some((value) => String(value).toLowerCase().includes(normalizedFilter)));
+  }, [statistics, yearStatisticFilter]);
+
+  const filteredDirectPreviewRows = useMemo(() => {
+    const normalizedFilter = directPreviewFilter.trim().toLowerCase();
+    if (!directPreview || !normalizedFilter) return directPreview?.rows ?? [];
+
+    return directPreview.rows.filter((row) => Object.values(row)
+      .some((value) => value.toLowerCase().includes(normalizedFilter)));
+  }, [directPreview, directPreviewFilter]);
 
   async function loadStatistics() {
     setStatisticsState("uploading");
@@ -294,13 +312,17 @@ export function DimensionsImportPanel() {
               <div><dt>Mit PMID</dt><dd>{statistics.withPubmedIdCount.toLocaleString("de-CH")} · {statistics.withPubmedIdPercentage}%</dd></div>
               <div><dt>Mit DOI</dt><dd>{statistics.withDoiCount.toLocaleString("de-CH")} · {statistics.withDoiPercentage}%</dd></div>
             </dl>
+            <label className="table-filter">
+              <span>KPI-Jahre filtern</span>
+              <input value={yearStatisticFilter} onChange={(event) => setYearStatisticFilter(event.target.value)} placeholder="Jahr oder Kennzahl" />
+            </label>
             <div className="data-grid direct-preview-grid" role="region" aria-label="Dimensions KPI pro Jahr" tabIndex={0}>
               <table>
                 <thead>
                   <tr><th>Jahr</th><th>Publikationen</th><th>Anteil gesamt</th><th>Mit PMID</th><th>Mit DOI</th></tr>
                 </thead>
                 <tbody>
-                  {statistics.yearStatistics.map((statistic) => (
+                  {filteredYearStatistics.map((statistic) => (
                     <tr key={statistic.year}>
                       <td>{statistic.year || "Unbekannt"}</td>
                       <td>{statistic.publicationCount.toLocaleString("de-CH")}</td>
@@ -309,6 +331,7 @@ export function DimensionsImportPanel() {
                       <td>{statistic.withDoiCount.toLocaleString("de-CH")} · {statistic.withDoiPercentage}%</td>
                     </tr>
                   ))}
+                  {!filteredYearStatistics.length && <tr><td colSpan={5}>Keine KPI-Zeilen für diesen Filter gefunden.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -323,17 +346,22 @@ export function DimensionsImportPanel() {
             <span>{directPreview.rowCount} Zeilen · {directPreview.columns.length} Spalten</span>
           </div>
           <p className="muted"><strong>Erkannte Spalten:</strong> {directPreview.columns.join(", ")}</p>
+          <label className="table-filter">
+            <span>Dimensions-Vorschau filtern</span>
+            <input value={directPreviewFilter} onChange={(event) => setDirectPreviewFilter(event.target.value)} placeholder="Suchtext in allen Vorschau-Spalten" />
+          </label>
           <div className="data-grid direct-preview-grid" role="region" aria-label="Dimensions CSV Direktvorschau" tabIndex={0}>
             <table>
               <thead>
                 <tr>{directPreview.columns.slice(0, 6).map((column) => <th key={column}>{column}</th>)}</tr>
               </thead>
               <tbody>
-                {directPreview.rows.map((row, rowIndex) => (
+                {filteredDirectPreviewRows.map((row, rowIndex) => (
                   <tr key={`dimensions-${rowIndex}`}>
                     {directPreview.columns.slice(0, 6).map((column) => <td key={`${rowIndex}-${column}`}>{row[column] || "—"}</td>)}
                   </tr>
                 ))}
+                {!filteredDirectPreviewRows.length && <tr><td colSpan={Math.max(directPreview.columns.slice(0, 6).length, 1)}>Keine Vorschau-Zeilen für diesen Filter gefunden.</td></tr>}
               </tbody>
             </table>
           </div>

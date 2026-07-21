@@ -3,12 +3,14 @@ import { detectBorisColumns, getMissingRequiredBorisFields, mapRowsToBorisPublic
 
 describe("BORIS import schema", () => {
   it("detects supported BORIS export column aliases", () => {
-    expect(detectBorisColumns(["Publication ID", "Digital Object Identifier", "PMID", "Titel", "Jahr"])).toMatchObject({
+    expect(detectBorisColumns(["Publication ID", "Digital Object Identifier", "PMID", "Titel", "Jahr", "Publication Type", "Publication Subtype"])).toMatchObject({
       borisId: "Publication ID",
       doi: "Digital Object Identifier",
       pubmedId: "PMID",
       title: "Titel",
       year: "Jahr",
+      publicationType: "Publication Type",
+      publicationSubtype: "Publication Subtype",
     });
   });
 
@@ -16,8 +18,9 @@ describe("BORIS import schema", () => {
     const mapping = detectBorisColumns(["DOI"]);
     expect(getMissingRequiredBorisFields(mapping)).toEqual(["BORIS-ID", "Titel"]);
 
-    expect(mapRowsToBorisPublications([{ "Publication ID": "B1", DOI: "10.1/demo", Titel: "Ein Titel" }])).toEqual([
-      { borisId: "B1", doi: "10.1/demo", pubmedId: undefined, title: "Ein Titel", year: undefined },
+    expect(mapRowsToBorisPublications([{ "Publication ID": "B1", DOI: "10.1/demo", Titel: "Ein Titel", Type: "Article", Subtype: "Journal" }])).toEqual([
+      { borisId: "B1", doi: "10.1/demo", pubmedId: undefined, title: "Ein Titel", year: undefined, publicationType: "Article", publicationSubtype: "Journal" },
     ]);
   });
+
 });
