@@ -17,13 +17,13 @@ export const borisFieldDefinitions: BorisFieldDefinition[] = [
     field: "borisId",
     label: "BORIS-ID",
     required: true,
-    aliases: ["borisid", "boris_id", "id", "recordid", "record_id", "publicationid", "publication_id"],
+    aliases: ["uuid","borisid", "boris_id", "id", "recordid", "record_id", "publicationid", "publication_id"],
   },
   {
     field: "doi",
     label: "DOI",
     required: false,
-    aliases: ["doi", "digitalobjectidentifier"],
+    aliases: ["publisherDOI","doi", "digitalobjectidentifier"],
   },
   {
     field: "pubmedId",
@@ -41,7 +41,7 @@ export const borisFieldDefinitions: BorisFieldDefinition[] = [
     field: "year",
     label: "Publikationsjahr",
     required: false,
-    aliases: ["year", "jahr", "publicationyear", "publication_year"],
+    aliases: ["year", "jahr", "publicationyear", "publication_year","year_of_publication"],
   },
 ];
 
