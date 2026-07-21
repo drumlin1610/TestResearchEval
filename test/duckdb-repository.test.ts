@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDimensionsMatchingCandidatesSql, buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql, buildDimensionsSnapshotStatisticsSql } from "../lib/import-workflow/server-duckdb-repository";
+import { buildDimensionsMatchingCandidateParams, buildDimensionsMatchingCandidatesSql, buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql, buildDimensionsSnapshotStatisticsSql } from "../lib/import-workflow/server-duckdb-repository";
 
 describe("DuckDB import workflow repository", () => {
   it("builds a Dimensions CSV snapshot import with normalized lookup columns", () => {
@@ -43,5 +43,13 @@ describe("DuckDB import workflow repository", () => {
     expect(sql).toContain("snapshot.status = 'active'");
     expect(sql).toContain("publication.snapshot_id = $snapshotId");
     expect(sql).toContain("LIMIT $limit");
+  });
+
+  it("does not bind an unused snapshot parameter for all active snapshots", () => {
+    const sql = buildDimensionsMatchingCandidatesSql();
+    const params = buildDimensionsMatchingCandidateParams();
+
+    expect(sql).not.toContain("$snapshotId");
+    expect(params).toEqual({ limit: 50_000 });
   });
 });

@@ -914,6 +914,20 @@ export function buildDimensionsMatchingCandidatesSql(options: DimensionsMatching
   `;
 }
 
+export function buildDimensionsMatchingCandidateParams(options: DimensionsMatchingCandidateOptions = {}) {
+  const requestedLimit = options.limit ?? Number(process.env.DIMENSIONS_MATCHING_CANDIDATE_LIMIT ?? 50_000);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.floor(requestedLimit)
+    : 50_000;
+  const values: Record<string, unknown> = { limit };
+
+  if (options.snapshotId) {
+    values.snapshotId = options.snapshotId;
+  }
+
+  return values;
+}
+
 export async function getDimensionsSnapshotStatistics(): Promise<DimensionsSnapshotStatistics> {
   await ensureDatabase();
 
@@ -968,7 +982,6 @@ export async function getDimensionsMatchingCandidates(
 ): Promise<DimensionsPublication[]> {
   await ensureDatabase();
 
-  const limit = options.limit ?? Number(process.env.DIMENSIONS_MATCHING_CANDIDATE_LIMIT ?? 50_000);
   const rows = await readDuckDbRows<{
     id: string;
     doi?: string | null;
@@ -978,10 +991,7 @@ export async function getDimensionsMatchingCandidates(
     year?: unknown;
   }>(
     buildDimensionsMatchingCandidatesSql(options),
-    {
-      snapshotId: options.snapshotId,
-      limit,
-    },
+    buildDimensionsMatchingCandidateParams(options),
   );
 
   return rows.map((row) => ({
