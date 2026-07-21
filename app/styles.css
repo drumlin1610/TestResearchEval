@@ -118,3 +118,6 @@ input:focus { border-color: #0b5cad; box-shadow: 0 0 0 4px rgb(11 92 173 / 12%);
 .direct-preview-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; }
 .direct-preview-header span { color: #52677a; font-weight: 800; }
 .direct-preview-grid { max-height: 260px; margin-top: 12px; }
+.dimensions-kpi { margin-top: 18px; padding: 16px; border: 1px solid #d8e2ef; border-radius: 18px; background: #fbfdff; }
+.kpi-summary dd { font-weight: 900; }
+.small-button { padding: 8px 12px; font-size: .86rem; }

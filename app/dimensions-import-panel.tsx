@@ -1,9 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Papa from "papaparse";
 
 type ImportState = "idle" | "uploading" | "success" | "error";
+
+type DimensionsYearStatistic = {
+  year: number;
+  publicationCount: number;
+  publicationPercentage: number;
+  withPubmedIdCount: number;
+  withPubmedIdPercentage: number;
+  withDoiCount: number;
+  withDoiPercentage: number;
+};
+
+type DimensionsStatistics = {
+  totalPublications: number;
+  activeSnapshots: number;
+  withPubmedIdCount: number;
+  withPubmedIdPercentage: number;
+  withDoiCount: number;
+  withDoiPercentage: number;
+  yearStatistics: DimensionsYearStatistic[];
+};
 
 type SnapshotResponse = {
   snapshotId: string;
@@ -44,6 +64,37 @@ export function DimensionsImportPanel() {
   const [message, setMessage] = useState("Noch kein Dimensions/GBQ CSV-Snapshot geladen.");
   const [response, setResponse] = useState<SnapshotResponse | null>(null);
   const [directPreview, setDirectPreview] = useState<DirectCsvPreview | null>(null);
+  const [statistics, setStatistics] = useState<DimensionsStatistics | null>(null);
+  const [statisticsState, setStatisticsState] = useState<ImportState>("idle");
+  const [statisticsMessage, setStatisticsMessage] = useState("KPI werden aus der DuckDB geladen, sobald ein Import vorhanden ist.");
+
+  async function loadStatistics() {
+    setStatisticsState("uploading");
+    setStatisticsMessage("Dimensions-KPI werden aus der DuckDB geladen.");
+
+    try {
+      const result = await fetch("/api/dimensions-snapshot", { method: "GET" });
+      const payload = await result.json().catch(() => null) as { statistics?: DimensionsStatistics; error?: string } | null;
+
+      if (!result.ok || !payload?.statistics) {
+        throw new Error(payload?.error ?? `KPI konnten nicht geladen werden (${result.status}).`);
+      }
+
+      setStatistics(payload.statistics);
+      setStatisticsState("success");
+      setStatisticsMessage(payload.statistics.totalPublications
+        ? "Dimensions-KPI erfolgreich geladen."
+        : "Noch keine Dimensions-Publikationen in der DuckDB gefunden.");
+    } catch (error) {
+      setStatistics(null);
+      setStatisticsState("error");
+      setStatisticsMessage(error instanceof Error ? error.message : "Dimensions-KPI konnten nicht geladen werden.");
+    }
+  }
+
+  useEffect(() => {
+    void loadStatistics();
+  }, []);
 
   async function importSnapshot() {
     if (!file) {
@@ -82,6 +133,7 @@ export function DimensionsImportPanel() {
       setResponse(payload as SnapshotResponse);
       setState("success");
       setMessage(`Snapshot ${payload.snapshotId} wurde erfolgreich importiert.`);
+      await loadStatistics();
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Dimensions-Import fehlgeschlagen. Nutze alternativ den Direktmodus ohne DuckDB.");
@@ -164,6 +216,7 @@ export function DimensionsImportPanel() {
       setDirectPreview({ ...parsed, rows: parsed.rows.slice(0, 5) });
       setState("success");
       setMessage(`${payload.rowCount ?? parsed.rowCount} Dimensions-Zeilen wurden per Insert-API gespeichert.`);
+      await loadStatistics();
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Insert-Import fehlgeschlagen.");
@@ -221,6 +274,47 @@ export function DimensionsImportPanel() {
           {response.mode && <div><dt>Modus</dt><dd>{response.mode}</dd></div>}
         </dl>
       )}
+
+      <div className="dimensions-kpi" aria-labelledby="dimensions-kpi-title">
+        <div className="direct-preview-header">
+          <strong id="dimensions-kpi-title">Dimensions KPI</strong>
+          <button type="button" className="ghost small-button" onClick={loadStatistics} disabled={statisticsState === "uploading"}>
+            {statisticsState === "uploading" ? "Lädt…" : "Aktualisieren"}
+          </button>
+        </div>
+        <div className={`status-banner status-${statisticsState}`} aria-live="polite">
+          <strong>{statisticsState === "success" ? "Statistik" : statisticsState === "error" ? "Hinweis" : statisticsState === "uploading" ? "Verarbeitung" : "Bereit"}</strong>
+          <span>{statisticsMessage}</span>
+        </div>
+        {statistics && (
+          <>
+            <dl className="snapshot-result kpi-summary">
+              <div><dt>Publikationen gesamt</dt><dd>{statistics.totalPublications.toLocaleString("de-CH")}</dd></div>
+              <div><dt>Aktive Snapshots</dt><dd>{statistics.activeSnapshots.toLocaleString("de-CH")}</dd></div>
+              <div><dt>Mit PMID</dt><dd>{statistics.withPubmedIdCount.toLocaleString("de-CH")} · {statistics.withPubmedIdPercentage}%</dd></div>
+              <div><dt>Mit DOI</dt><dd>{statistics.withDoiCount.toLocaleString("de-CH")} · {statistics.withDoiPercentage}%</dd></div>
+            </dl>
+            <div className="data-grid direct-preview-grid" role="region" aria-label="Dimensions KPI pro Jahr" tabIndex={0}>
+              <table>
+                <thead>
+                  <tr><th>Jahr</th><th>Publikationen</th><th>Anteil gesamt</th><th>Mit PMID</th><th>Mit DOI</th></tr>
+                </thead>
+                <tbody>
+                  {statistics.yearStatistics.map((statistic) => (
+                    <tr key={statistic.year}>
+                      <td>{statistic.year || "Unbekannt"}</td>
+                      <td>{statistic.publicationCount.toLocaleString("de-CH")}</td>
+                      <td>{statistic.publicationPercentage}%</td>
+                      <td>{statistic.withPubmedIdCount.toLocaleString("de-CH")} · {statistic.withPubmedIdPercentage}%</td>
+                      <td>{statistic.withDoiCount.toLocaleString("de-CH")} · {statistic.withDoiPercentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
 
       {directPreview && (
         <div className="direct-preview">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql } from "../lib/import-workflow/server-duckdb-repository";
+import { buildDimensionsSnapshotImportSql, buildDimensionsSnapshotInsertSql, buildDimensionsSnapshotStatisticsSql } from "../lib/import-workflow/server-duckdb-repository";
 
 describe("DuckDB import workflow repository", () => {
   it("builds a Dimensions CSV snapshot import with normalized lookup columns", () => {
@@ -23,5 +23,15 @@ describe("DuckDB import workflow repository", () => {
     expect(sql).not.toContain("read_csv_auto");
     expect(sql).toContain("$rawPayload::JSON");
     expect(sql).toContain("normalized_doi");
+  });
+
+  it("builds Dimensions KPI statistics queries", () => {
+    const { summarySql, yearSql } = buildDimensionsSnapshotStatisticsSql();
+
+    expect(summarySql).toContain("count(*) AS total_publications");
+    expect(summarySql).toContain("with_pubmed_id_count");
+    expect(summarySql).toContain("with_doi_count");
+    expect(yearSql).toContain("GROUP BY year");
+    expect(yearSql).toContain("ORDER BY year DESC NULLS LAST");
   });
 });

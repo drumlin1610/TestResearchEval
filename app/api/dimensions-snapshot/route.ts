@@ -2,9 +2,15 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { importDimensionsSnapshotFromCsv, importWorkflowDatabasePath } from "@/lib/import-workflow/server-duckdb-repository";
+import { getDimensionsSnapshotStatistics, importDimensionsSnapshotFromCsv, importWorkflowDatabasePath } from "@/lib/import-workflow/server-duckdb-repository";
 
 export const dynamic = "force-dynamic";
+
+export async function GET() {
+  const statistics = await getDimensionsSnapshotStatistics();
+
+  return NextResponse.json({ databasePath: importWorkflowDatabasePath, statistics });
+}
 
 export async function POST(request: Request) {
   const formData = await request.formData();
