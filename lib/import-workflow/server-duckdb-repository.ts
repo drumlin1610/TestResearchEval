@@ -4,7 +4,6 @@ import type { AsyncImportSessionRepository } from "./types";
 import { createPersistedImportSession, importSessionStorageKey, parsePersistedImportSession } from "./persistence";
 
 type DuckDBConnection = {
-  run(sql: string, values?: Record<string, unknown>): Promise<unknown>;
   runAndReadAll(sql: string, values?: Record<string, unknown>): Promise<{ getRowObjects(): unknown[] }>;
 };
 
@@ -23,6 +22,7 @@ type DuckDBNodeApi = {
 const duckDbPackageName = "@duckdb/node-api";
 const databaseDirectory = path.join(process.cwd(), "data");
 const databasePath = path.join(databaseDirectory, "research-eval.duckdb");
+const duckDbStatementTimeoutMs = Number(process.env.DUCKDB_STATEMENT_TIMEOUT_MS ?? 120_000);
 
 let connectionPromise: Promise<DuckDBConnection> | null = null;
 let repositoryPromise: Promise<AsyncImportSessionRepository> | null = null;
@@ -45,9 +45,48 @@ async function getConnection(): Promise<DuckDBConnection> {
   return promise;
 }
 
+function summarizeSql(sql: string) {
+  return sql.replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+async function withDuckDbStatementTimeout<T>(operation: Promise<T>, sql: string) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`DuckDB statement timed out after ${duckDbStatementTimeoutMs}ms: ${summarizeSql(sql)}`));
+    }, duckDbStatementTimeoutMs);
+  });
+
+  try {
+    return await Promise.race([operation, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function runDuckDbSql(sql: string, values?: Record<string, unknown>) {
   const connection = await getConnection();
-  await connection.run(sql, values);
+  const startedAt = Date.now();
+  const summary = summarizeSql(sql);
+  console.info("[duckdb:sql] Running statement", {
+    sql: summary,
+    hasValues: Boolean(values && Object.keys(values).length),
+  });
+
+  try {
+    await withDuckDbStatementTimeout(connection.runAndReadAll(sql, values), sql);
+    console.info("[duckdb:sql] Statement completed", {
+      sql: summary,
+      durationMs: Date.now() - startedAt,
+    });
+  } catch (error) {
+    console.error("[duckdb:sql] Statement failed", {
+      sql: summary,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
+    throw error;
+  }
 }
 
 async function readDuckDbRows<Row>(sql: string, values?: Record<string, unknown>) {
