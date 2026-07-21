@@ -494,6 +494,45 @@ export function buildDimensionsSnapshotImportSql() {
   `;
 }
 
+
+export type DimensionsSnapshotYearStatistic = {
+  year: number;
+  publicationCount: number;
+  publicationPercentage: number;
+  withPubmedIdCount: number;
+  withPubmedIdPercentage: number;
+  withDoiCount: number;
+  withDoiPercentage: number;
+};
+
+export type DimensionsSnapshotStatistics = {
+  totalPublications: number;
+  activeSnapshots: number;
+  withPubmedIdCount: number;
+  withPubmedIdPercentage: number;
+  withDoiCount: number;
+  withDoiPercentage: number;
+  yearStatistics: DimensionsSnapshotYearStatistic[];
+};
+
+function toNumber(value: unknown) {
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function percentage(part: number, total: number) {
+  return total > 0 ? Number(((part / total) * 100).toFixed(1)) : 0;
+}
+
 export async function importDimensionsSnapshotFromCsv(
   options: {
     csvPath: string;
@@ -820,6 +859,82 @@ export async function importDimensionsSnapshotFromRows(
 
     throw error;
   }
+}
+
+export function buildDimensionsSnapshotStatisticsSql() {
+  return {
+    summarySql: `
+      SELECT
+        count(*) AS total_publications,
+        (
+          SELECT count(*)
+          FROM dimensions_snapshots
+          WHERE status = 'active'
+        ) AS active_snapshots,
+        count(*) FILTER (WHERE normalized_pubmed_id IS NOT NULL AND normalized_pubmed_id != '') AS with_pubmed_id_count,
+        count(*) FILTER (WHERE normalized_doi IS NOT NULL AND normalized_doi != '') AS with_doi_count
+      FROM dimensions_publications;
+    `,
+    yearSql: `
+      SELECT
+        year,
+        count(*) AS publication_count,
+        count(*) FILTER (WHERE normalized_pubmed_id IS NOT NULL AND normalized_pubmed_id != '') AS with_pubmed_id_count,
+        count(*) FILTER (WHERE normalized_doi IS NOT NULL AND normalized_doi != '') AS with_doi_count
+      FROM dimensions_publications
+      GROUP BY year
+      ORDER BY year DESC NULLS LAST;
+    `,
+  };
+}
+
+export async function getDimensionsSnapshotStatistics(): Promise<DimensionsSnapshotStatistics> {
+  await ensureDatabase();
+
+  const { summarySql, yearSql } = buildDimensionsSnapshotStatisticsSql();
+
+  const summaryRows = await readDuckDbRows<{
+    total_publications: unknown;
+    active_snapshots: unknown;
+    with_pubmed_id_count: unknown;
+    with_doi_count: unknown;
+  }>(summarySql);
+
+  const yearRows = await readDuckDbRows<{
+    year: unknown;
+    publication_count: unknown;
+    with_pubmed_id_count: unknown;
+    with_doi_count: unknown;
+  }>(yearSql);
+
+  const summary = summaryRows[0];
+  const totalPublications = toNumber(summary?.total_publications);
+  const withPubmedIdCount = toNumber(summary?.with_pubmed_id_count);
+  const withDoiCount = toNumber(summary?.with_doi_count);
+
+  return {
+    totalPublications,
+    activeSnapshots: toNumber(summary?.active_snapshots),
+    withPubmedIdCount,
+    withPubmedIdPercentage: percentage(withPubmedIdCount, totalPublications),
+    withDoiCount,
+    withDoiPercentage: percentage(withDoiCount, totalPublications),
+    yearStatistics: yearRows.map((row) => {
+      const publicationCount = toNumber(row.publication_count);
+      const yearPubmedIdCount = toNumber(row.with_pubmed_id_count);
+      const yearDoiCount = toNumber(row.with_doi_count);
+
+      return {
+        year: toNumber(row.year),
+        publicationCount,
+        publicationPercentage: percentage(publicationCount, totalPublications),
+        withPubmedIdCount: yearPubmedIdCount,
+        withPubmedIdPercentage: percentage(yearPubmedIdCount, publicationCount),
+        withDoiCount: yearDoiCount,
+        withDoiPercentage: percentage(yearDoiCount, publicationCount),
+      };
+    }),
+  };
 }
 
 export async function createDuckDbImportSessionRepository(): Promise<AsyncImportSessionRepository> {
