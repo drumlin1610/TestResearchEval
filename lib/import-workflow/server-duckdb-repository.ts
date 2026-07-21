@@ -45,6 +45,15 @@ async function getConnection(): Promise<DuckDBConnection> {
   return promise;
 }
 
+
+function duckDbJsonPath(key: string) {
+  return `$.${JSON.stringify(key)}`;
+}
+
+function jsonTextCoalesceSql(jsonColumn: string, keys: string[]) {
+  return `coalesce(${keys.map((key) => `json_extract_string(${jsonColumn}, '${duckDbJsonPath(key)}')`).join(", ")}, '')`;
+}
+
 function summarizeSql(sql: string) {
   return sql.replace(/\s+/g, " ").trim().slice(0, 160);
 }
@@ -180,9 +189,26 @@ async function ensureDatabase() {
 }
 
 export function buildDimensionsSnapshotImportSql() {
+  const idSql = jsonTextCoalesceSql("raw_json", ["id", "publication_id", "publicationId", "dimensions_id", "Dimensions ID", "Publication ID"]);
+  const doiSql = jsonTextCoalesceSql("raw_json", ["doi", "DOI"]);
+  const pubmedIdSql = jsonTextCoalesceSql("raw_json", ["pubmed_id", "pubmedId", "pmid", "PMID", "PubMed ID"]);
+  const titleSql = jsonTextCoalesceSql("raw_json", ["title", "Title"]);
+  const yearSql = jsonTextCoalesceSql("raw_json", ["year", "publication_year", "publicationYear", "Year", "Publication Year"]);
+
   return `
+    CREATE OR REPLACE TEMP TABLE imported_dimensions_raw AS
+      SELECT to_json(csv_row) AS raw_json
+      FROM read_csv_auto($csvPath, header = true, ignore_errors = true) AS csv_row;
+
     CREATE OR REPLACE TEMP TABLE imported_dimensions AS
-      SELECT * FROM read_csv_auto($csvPath, header = true, ignore_errors = true);
+      SELECT
+        ${idSql} AS id,
+        ${doiSql} AS doi,
+        ${pubmedIdSql} AS pubmed_id,
+        ${titleSql} AS title,
+        ${yearSql} AS year,
+        raw_json
+      FROM imported_dimensions_raw;
 
     DELETE FROM dimensions_publications WHERE snapshot_id = $snapshotId;
     DELETE FROM dimensions_snapshots WHERE id = $snapshotId;
@@ -213,9 +239,9 @@ export function buildDimensionsSnapshotImportSql() {
       regexp_replace(coalesce(pubmed_id, ''), '[^0-9]', '', 'g') AS normalized_pubmed_id,
       lower(regexp_replace(coalesce(title, ''), '[^[:alnum:] ]', ' ', 'g')) AS normalized_title,
       try_cast(year AS INTEGER) AS year,
-      to_json(imported_dimensions) AS raw_payload
+      raw_json AS raw_payload
     FROM imported_dimensions
-    WHERE id IS NOT NULL;
+    WHERE id IS NOT NULL AND id != '';
   `;
 }
 
@@ -292,7 +318,7 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
 
     for (const [rowIndex, row] of options.rows.entries()) {
       const processedRows = rowIndex + 1;
-      const id = getTextValue(row, ["id", "publication_id", "dimensions_id"]);
+      const id = getTextValue(row, ["id", "publication_id", "publicationId", "dimensions_id", "Dimensions ID", "Publication ID"]);
       if (!id) {
         console.warn("[dimensions:insert] Skipping row without Dimensions id", {
           snapshotId: options.snapshotId,
@@ -309,9 +335,9 @@ export async function importDimensionsSnapshotFromRows(options: { snapshotId: st
         id,
         snapshotId: options.snapshotId,
         doi: getTextValue(row, ["doi", "DOI"]),
-        pubmedId: getTextValue(row, ["pubmed_id", "pubmedId", "pmid", "PMID"]),
+        pubmedId: getTextValue(row, ["pubmed_id", "pubmedId", "pmid", "PMID", "PubMed ID"]),
         title: getTextValue(row, ["title", "Title"]),
-        publicationYear: getIntegerValue(row, ["year", "publication_year", "publicationYear"], options.year),
+        publicationYear: getIntegerValue(row, ["year", "publication_year", "publicationYear", "Year", "Publication Year"], options.year),
         rawPayload: JSON.stringify(row),
       });
       insertedRows += 1;

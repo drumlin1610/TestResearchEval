@@ -6,6 +6,9 @@ describe("DuckDB import workflow repository", () => {
     const sql = buildDimensionsSnapshotImportSql();
 
     expect(sql).toContain("read_csv_auto($csvPath");
+    expect(sql).toContain("to_json(csv_row) AS raw_json");
+    expect(sql).toContain("json_extract_string(raw_json, '$.\"Publication ID\"')");
+    expect(sql).toContain("json_extract_string(raw_json, '$.\"PubMed ID\"')");
     expect(sql).toContain("INSERT INTO dimensions_snapshots");
     expect(sql).toContain("normalized_doi");
     expect(sql).toContain("normalized_pubmed_id");
