@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Papa from "papaparse";
 import type { MatchSummary, SourcePublication } from "@/lib/dimensions-matching";
 import { createHttpImportSessionRepository } from "@/lib/import-workflow/http-repository";
