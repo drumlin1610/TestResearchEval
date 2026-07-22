@@ -4,6 +4,8 @@ export type SourcePublication = {
   pubmedId?: string;
   title?: string;
   year?: number;
+  publicationType?: string;
+  publicationSubtype?: string;
 };
 
 export type DimensionsPublication = {

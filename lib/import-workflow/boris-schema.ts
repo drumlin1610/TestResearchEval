@@ -1,7 +1,7 @@
 import type { SourcePublication } from "../dimensions-matching";
 import type { ImportRow } from "./types";
 
-export type BorisField = "borisId" | "doi" | "pubmedId" | "title" | "year";
+export type BorisField = "borisId" | "doi" | "pubmedId" | "title" | "year" | "publicationType" | "publicationSubtype";
 
 export type BorisFieldDefinition = {
   field: BorisField;
@@ -43,6 +43,18 @@ export const borisFieldDefinitions: BorisFieldDefinition[] = [
     required: false,
     aliases: ["year", "jahr", "publicationyear", "publication_year","year_of_publication"],
   },
+  {
+    field: "publicationType",
+    label: "Publikationstyp",
+    required: false,
+    aliases: ["type", "typ", "publicationtype", "publication_type", "documenttype", "document_type", "itemtype", "item_type"],
+  },
+  {
+    field: "publicationSubtype",
+    label: "Publikationssubtyp",
+    required: false,
+    aliases: ["subtype", "subtyp", "publicationsubtype", "publication_subtype", "documentsubtype", "document_subtype", "itemsubtype", "item_subtype"],
+  },
 ];
 
 export function normalizeBorisHeader(value: string) {
@@ -77,5 +89,7 @@ export function mapRowsToBorisPublications(rows: ImportRow[]): SourcePublication
     pubmedId: mapping.pubmedId ? row[mapping.pubmedId] : undefined,
     title: mapping.title ? row[mapping.title] : undefined,
     year: mapping.year && row[mapping.year] ? Number(row[mapping.year]) : undefined,
+    publicationType: mapping.publicationType ? row[mapping.publicationType] : undefined,
+    publicationSubtype: mapping.publicationSubtype ? row[mapping.publicationSubtype] : undefined,
   }));
 }

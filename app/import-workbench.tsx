@@ -40,6 +40,8 @@ export function ImportWorkbench() {
   const [summary, setSummary] = useState<MatchSummary>(emptyMatchSummary);
   const [matchingMessage, setMatchingMessage] = useState("Noch keine BORIS-Daten für das DuckDB-Matching geladen.");
   const [matchingCandidateCount, setMatchingCandidateCount] = useState(0);
+  const [importGridFilter, setImportGridFilter] = useState("");
+  const [matchingGridFilter, setMatchingGridFilter] = useState("");
 
   useEffect(() => {
     const repository = createHttpImportSessionRepository();
@@ -78,7 +80,7 @@ export function ImportWorkbench() {
     }
 
     const controller = new AbortController();
-    setMatchingMessage("Matching gegen importierte Dimensions-Daten aus DuckDB läuft.");
+    setMatchingMessage(`${sources.length} BORIS-Zeilen werden gegen importierte Dimensions-Daten geprüft.`);
 
     fetch("/api/matching/run", {
       method: "POST",
@@ -94,7 +96,7 @@ export function ImportWorkbench() {
 
         setSummary(payload.summary);
         setMatchingCandidateCount(payload.candidateCount ?? 0);
-        setMatchingMessage(`${payload.candidateCount ?? 0} importierte Dimensions-Kandidaten aus DuckDB verglichen.`);
+        setMatchingMessage(`${sources.length} BORIS-Zeilen gegen ${payload.candidateCount ?? 0} importierte Dimensions-Kandidaten aus DuckDB verglichen.`);
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
@@ -112,8 +114,30 @@ export function ImportWorkbench() {
   const rowsWithDoi = sources.filter((source) => source.doi).length;
   const rowsWithPubmed = sources.filter((source) => source.pubmedId).length;
   const rowsWithTitle = sources.filter((source) => source.title).length;
+  const matchesWithDimensionsId = summary.results.filter((result) => result.candidate?.id).length;
+  const dimensionsIdRate = sources.length ? matchesWithDimensionsId / sources.length : 0;
 
   const gridColumns = detectedColumns.slice(0, 12);
+  const normalizedImportGridFilter = importGridFilter.trim().toLowerCase();
+  const filteredRows = normalizedImportGridFilter
+    ? rows.filter((row) => Object.values(row).some((value) => value.toLowerCase().includes(normalizedImportGridFilter)))
+    : rows;
+  const normalizedMatchingGridFilter = matchingGridFilter.trim().toLowerCase();
+  const matchingRows = [
+    ...summary.results.map((result) => ({
+      key: result.source.borisId,
+      borisId: result.source.borisId,
+      type: result.source.publicationType || "—",
+      subtype: result.source.publicationSubtype || "—",
+      method: result.method,
+      confidence: `${(result.confidence * 100).toFixed(1)}%`,
+      dimensionsId: result.candidate?.id ?? "—",
+      status: result.method === "unmatched" ? "Nicht gefunden" : "Gefunden",
+    })),
+  ];
+  const filteredMatchingRows = normalizedMatchingGridFilter
+    ? matchingRows.filter((row) => Object.values(row).some((value) => value.toLowerCase().includes(normalizedMatchingGridFilter)))
+    : matchingRows;
 
   function appendWorkflowLog(level: WorkflowLogLevel, message: string, details?: string) {
     setWorkflowLog((current) => [{
@@ -219,6 +243,12 @@ export function ImportWorkbench() {
         <article><strong>{rowsWithPubmed}</strong><span>mit PubMed-ID</span></article>
         <article><strong>{rowsWithTitle}</strong><span>mit Titel</span></article>
       </div>
+      <div className="cards compact" aria-label="Matching-Kennzahlen">
+        <article><strong>{summary.total}</strong><span>für Matching geprüft</span></article>
+        <article><strong>{summary.unmatched}</strong><span>ohne zuverlässigen Treffer</span></article>
+        <article><strong>{matchesWithDimensionsId}</strong><span>mit Dimensions-ID gefunden</span></article>
+        <article><strong>{(dimensionsIdRate * 100).toFixed(1)}%</strong><span>Dimensions-ID Trefferquote</span></article>
+      </div>
 
       {detectedColumns.length > 0 && <p className="muted"><strong>Erkannte Spalten:</strong> {detectedColumns.join(", ")}</p>}
       {detectedColumns.length > 0 && (
@@ -276,6 +306,10 @@ export function ImportWorkbench() {
       </div>
 
       <h3>Alle Importdaten im Grid</h3>
+      <label className="table-filter">
+        <span>Importdaten filtern</span>
+        <input value={importGridFilter} onChange={(event) => setImportGridFilter(event.target.value)} placeholder="Suchtext in allen Spalten" />
+      </label>
       <div className="data-grid" role="region" aria-label="Alle importierten BORIS-Daten" tabIndex={0}>
         <table>
           <thead>
@@ -285,12 +319,13 @@ export function ImportWorkbench() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, rowIndex) => (
+            {filteredRows.map((row, rowIndex) => (
               <tr key={`row-${rowIndex}`}>
                 {gridColumns.map((column) => <td key={`${rowIndex}-${column}`}>{row[column] || "—"}</td>)}
               </tr>
             ))}
             {!rows.length && <tr><td>Nach dem Upload wird jede importierte Zeile in diesem Grid angezeigt.</td></tr>}
+            {rows.length > 0 && !filteredRows.length && <tr><td colSpan={Math.max(gridColumns.length, 1)}>Keine Importzeilen für diesen Filter gefunden.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -298,13 +333,21 @@ export function ImportWorkbench() {
 
       <h3>Matching gegen importierte Dimensions-Daten</h3>
       <p className="muted">{matchingMessage}{matchingCandidateCount > 0 ? ` · Kandidaten: ${matchingCandidateCount}` : ""}</p>
-      <table>
-        <thead><tr><th>BORIS-ID</th><th>Methode</th><th>Confidence</th><th>Dimensions ID</th></tr></thead>
-        <tbody>
-          {summary.results.slice(0, 8).map((result) => <tr key={result.source.borisId}><td>{result.source.borisId}</td><td>{result.method}</td><td>{(result.confidence * 100).toFixed(1)}%</td><td>{result.candidate?.id ?? "—"}</td></tr>)}
-          {!summary.results.length && <tr><td colSpan={4}>Noch keine Importdaten für ein Matching vorhanden.</td></tr>}
-        </tbody>
-      </table>
+      <p className="muted">Angezeigt werden alle BORIS-Zeilen mit Matchstatus, Methode, Confidence und gefundener Dimensions-ID.</p>
+      <label className="table-filter">
+        <span>Matching-Ergebnisse filtern</span>
+        <input value={matchingGridFilter} onChange={(event) => setMatchingGridFilter(event.target.value)} placeholder="BORIS-ID, Methode, Typ, Subtyp oder Dimensions-ID" />
+      </label>
+      <div className="data-grid" role="region" aria-label="Matching-Ergebnisse" tabIndex={0}>
+        <table>
+          <thead><tr><th>BORIS-ID</th><th>Typ</th><th>Subtyp</th><th>Status</th><th>Methode</th><th>Confidence</th><th>Dimensions ID</th></tr></thead>
+          <tbody>
+            {filteredMatchingRows.map((row) => <tr key={row.key}><td>{row.borisId}</td><td>{row.type}</td><td>{row.subtype}</td><td>{row.status}</td><td>{row.method}</td><td>{row.confidence}</td><td>{row.dimensionsId}</td></tr>)}
+            {!matchingRows.length && <tr><td colSpan={7}>Noch keine Importdaten für ein Matching vorhanden.</td></tr>}
+            {matchingRows.length > 0 && !filteredMatchingRows.length && <tr><td colSpan={7}>Keine Matching-Zeilen für diesen Filter gefunden.</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
